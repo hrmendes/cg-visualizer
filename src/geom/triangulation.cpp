@@ -38,10 +38,11 @@ vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder* rec){
 
         int idx = next[nxt];
         while (idx != pre) {
-            if (poly[idx].x >= min_x &&
-                poly[idx].x <= max_x &&
-                poly[idx].y >= min_y &&
-                poly[idx].y <= max_y
+            // avoid cross products when outside bounding box
+            if (sgn(poly[idx].x - min_x) == 1 &&
+                sgn(poly[idx].x - max_x) ==-1 &&
+                sgn(poly[idx].y - min_y) == 1 &&
+                sgn(poly[idx].y - max_y) ==-1
             ) {
                 if (
                     in_tri(poly[idx], poly[pre], poly[cur], poly[nxt])
@@ -68,7 +69,6 @@ vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder* rec){
             cur = ears.back();
             ears.pop_back();
         }
-
         int pre = prev[cur];
         int nxt = next[cur];
 
@@ -85,18 +85,14 @@ vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder* rec){
         remaining--;
 
         if (check_ear(pre)) {
+            if (!is_ear[pre]) ears.push_back(pre);
             is_ear[pre] = true;
-            ears.push_back(pre);
-        } else {
-            is_ear[pre] = false;
-        }
+        } else is_ear[pre] = false;
 
         if (check_ear(nxt)) {
+            if (!is_ear[nxt]) ears.push_back(nxt);
             is_ear[nxt] = true;
-            ears.push_back(nxt);
-        } else {
-            is_ear[nxt] = false;
-        }
+        } else is_ear[nxt] = false;
 
         if (rec){
             rec->record_polygon(poly);
@@ -125,8 +121,6 @@ vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder* rec){
 
     return ans;
 }
-
-
 
 
 // O(n^3) version of ears clipping triangulation
