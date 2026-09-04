@@ -128,8 +128,8 @@ void Visualizer::init_render_resources() {
 
 // 2. Função auxiliar limpa apenas para o Pipeline
 VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
-    auto vertShaderCode = read_file("vulkan_renderer/shaders/vert.spv");
-    auto fragShaderCode = read_file("vulkan_renderer/shaders/frag.spv");
+    auto vertShaderCode = read_file("src/vulkan_renderer/shaders/vert.spv");
+    auto fragShaderCode = read_file("src/vulkan_renderer/shaders/frag.spv");
 
     VkShaderModule vertShaderModule = create_shader_module(vkState->device, vertShaderCode);
     VkShaderModule fragShaderModule = create_shader_module(vkState->device, fragShaderCode);
