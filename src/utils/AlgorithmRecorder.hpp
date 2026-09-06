@@ -148,19 +148,19 @@ private:
         glm::vec4 grid_color = {0.20f, 0.20f, 0.20f, 0.4f};
         for (float x = grid_minx; x <= grid_maxx; x += step) {
             if (x == 0.0f) continue;
-            vis.draw_line(ptf(x, grid_minx), ptf(x, grid_maxx), grid_color);
+            vis.draw_line(ptf(x, grid_miny), ptf(x, grid_maxy), grid_color);
         }
         for (float y = grid_miny; y <= grid_maxy; y += step) {
             if (y == 0.0f) continue;
-            vis.draw_line(ptf(grid_miny, y), ptf(grid_maxy, y), grid_color);
+            vis.draw_line(ptf(grid_minx, y), ptf(grid_maxx, y), grid_color);
         }
 
         float half_thick = axis_thickness / 2.0f;
         for (float offset = -half_thick; offset <= half_thick; offset += 0.1f) {
-            vis.draw_line(ptf(grid_minx, offset), ptf(grid_maxx, offset), {1,0,0,1});
+            vis.draw_line(ptf(grid_minx, offset), ptf(grid_maxx, offset), RED);
         }
         for (float offset = -half_thick; offset <= half_thick; offset += 0.1f) {
-            vis.draw_line(ptf(offset, grid_minx), ptf(offset, grid_maxx), {0,1,0,1});
+            vis.draw_line(ptf(offset, grid_minx), ptf(offset, grid_maxx), GREEN);
         }
     }
 
