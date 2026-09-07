@@ -1,19 +1,14 @@
 #include "geom/geom.hpp"
 #include "geom/basics.hpp"
 #include "geom/triangulation.hpp"
-
-#include <chrono>
-#include <iostream>
-#include <vector>
-
-using namespace std;
+#include "utils/generators/geometry.hpp"
 
 int main() {
     int mn = -2000000, mx = 2000000;
     cout << "how many vertices you wanna triangulate?\n";
     int n; cin >> n;
 
-    vector<pt> polygon = generate_random_polygon(n, mn, mx);
+    vector<pt> polygon = random_simple_polygon(n, mn, mx);
 
     auto start = chrono::steady_clock::now();
     triangulate(polygon);

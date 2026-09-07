@@ -1,5 +1,7 @@
 #include "colors.hpp"
 
+const glm::vec4 TRANSPARENT= {0.00f, 0.00f, 0.00f, 0.0f};
+
 const glm::vec4 RED        = {1.00f, 0.00f, 0.00f, 1.0f};
 const glm::vec4 GREEN      = {0.00f, 1.00f, 0.00f, 1.0f};
 const glm::vec4 BLUE       = {0.00f, 0.00f, 1.00f, 1.0f};

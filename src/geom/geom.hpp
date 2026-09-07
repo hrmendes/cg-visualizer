@@ -5,7 +5,7 @@ using namespace std;
 #define sz(x) ((int)x.size())
 
 using ld = long double;
-using T = long long; // change to ld if necessary
+using T = ld; // change to ld if necessary
 
 extern const ld DINF;
 extern const ld pi;
@@ -72,8 +72,3 @@ ld disttoseg(pt p, line r);
 struct tri { pt a, b, c; };
 
 bool in_tri(pt p, pt a, pt b, pt c);
-
-extern mt19937 rng;
-pt random_pt(int min_c, int max_c);
-
-vector<pt> generate_random_polygon(int n, int min_c, int max_c);

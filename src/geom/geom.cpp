@@ -2,8 +2,6 @@
 
 #define sz(x) ((int)x.size())
 
-using ld = long double;
-using T = long long; // change to ld if necessary
 const ld DINF = 2e18;
 const ld pi = acosl(-1.0);
 const ld eps = 1e-9;
@@ -73,22 +71,4 @@ bool in_tri(pt p, pt a, pt b, pt c) {
     bool b2 = sgn(sarea2(p, b, c)) < 0;
     bool b3 = sgn(sarea2(p, c, a)) < 0;
     return (b1 == b2) && (b2 == b3);
-}
-
-mt19937 rng(chrono::steady_clock::now().time_since_epoch().count());
-pt random_pt(int min_c, int max_c) {
-    uniform_int_distribution<int> dist(min_c, max_c);
-    return {dist(rng), dist(rng)};
-}
-
-vector<pt> generate_random_polygon(int n, int min_c, int max_c) {
-    vector<pt> pts(n);
-    for (int i = 0; i < n; ++i) pts[i] = random_pt(min_c, max_c);
-    ld cx = 0, cy = 0;
-    for (auto p : pts) { cx += p.x; cy += p.y; }
-    cx /= n; cy /= n;
-    sort(pts.begin(), pts.end(), [cx,cy](const pt& a, const pt& b) {
-        return atan2(a.y-cy, a.x-cx) < atan2(b.y-cy, b.x-cx);
-    });
-    return pts;
 }

@@ -3,6 +3,8 @@
 
 #include <glm/glm.hpp>
 
+extern const glm::vec4 TRANSPARENT;
+
 extern const glm::vec4 RED;
 extern const glm::vec4 GREEN;
 extern const glm::vec4 BLUE;
