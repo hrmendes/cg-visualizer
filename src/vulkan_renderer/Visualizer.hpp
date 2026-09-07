@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include "VkBootstrap.h"
 #include <GLFW/glfw3.h>
+#include "../geom/triangulation.hpp"
 
 struct Vertex {
     glm::vec2 pos;
