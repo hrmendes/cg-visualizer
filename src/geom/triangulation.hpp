@@ -1,6 +1,7 @@
 #pragma once
 #include "geom.hpp"
-#include "../utils/AlgorithmRecorder.hpp"
+
+class AlgorithmRecorder;
 
 // O(n^2) version of ears clipping triangulation
 vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder *rec = nullptr); 

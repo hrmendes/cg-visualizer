@@ -1,4 +1,5 @@
 #include "triangulation.hpp"
+#include "../utils/AlgorithmRecorder.hpp"
 
 vector<tri> triangulate(vector<pt> poly, AlgorithmRecorder* rec){
     vector<tri> ans;
