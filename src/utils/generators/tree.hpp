@@ -1,6 +1,8 @@
 #pragma once
 
-#include "rng.hpp"
+#include <bits/stdc++.h>
 using namespace std;
 
-// TODO: implement tree generators
+vector<vector<pair<int,int>>> random_weighted_tree(int n, int min_w = 1, int max_w = 20);
+
+vector<vector<int>> random_tree(int n);
