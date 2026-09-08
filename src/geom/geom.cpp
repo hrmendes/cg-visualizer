@@ -72,3 +72,12 @@ bool in_tri(pt p, pt a, pt b, pt c) {
     bool b3 = sgn(sarea2(p, c, a)) < 0;
     return (b1 == b2) && (b2 == b3);
 }
+
+vector<pt> get_circle_polygon(pt center, ld radius, int segments){
+    vector<pt> circle(segments);
+    for (int s = 0; s < segments; s++) {
+        ld ang = 2*M_PI * s/segments;
+        circle[s] = pt(center.x + radius*cos(ang), center.y + radius*sin(ang));
+    }
+    return circle;
+}

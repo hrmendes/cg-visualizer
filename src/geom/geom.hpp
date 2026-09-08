@@ -72,3 +72,5 @@ ld disttoseg(pt p, line r);
 struct tri { pt a, b, c; };
 
 bool in_tri(pt p, pt a, pt b, pt c);
+
+vector<pt> get_circle_polygon(pt center, ld radius, int segments = 20);

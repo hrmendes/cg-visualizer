@@ -282,13 +282,6 @@ void Visualizer::init(int width, int height) {
     std::cout << ">> GPU Selecionada: " << vkb_phys_dev.name << std::endl;
 
     // 5. Criar Logical Device
-    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extDynamicState{};
-    extDynamicState.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
-    extDynamicState.extendedDynamicState = VK_TRUE;
-
-    VkPhysicalDeviceFeatures features{};
-    features.largePoints = VK_TRUE;
-
     vkb::DeviceBuilder dev_builder{vkb_phys_dev};
     auto dev_ret = dev_builder.build();
     

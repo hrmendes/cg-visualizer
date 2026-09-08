@@ -18,7 +18,7 @@ public:
         DRAW_POINT, 
         DRAW_LINE, 
         DRAW_POLYGON, 
-        DRAW_HIGHLIGHT_POINT, 
+        DRAW_HIGHLIGHT, 
         DRAW_CIRCLE, 
         DRAW_RECTANGLE, 
         DRAW_TEXT, 
@@ -73,7 +73,7 @@ public:
     
     void commit_step();
     void clear();
-    void run(int time_ms = 500);
+    void run(int frametime_ms = 500);
 
 private:
     vector<Command> current_frame_commands;
@@ -85,4 +85,5 @@ private:
     void draw_axis();
     vector<pt> compute_layout(int n, const vector<vector<pair<int, int>>>& adj, GraphLayoutType layout_type);
     void draw_arrow_head(pt from, pt to, ld node_radius);
+    pt draw_edge(const vector<pt> &pos, int u, int v, const ld node_radius, bool directed, bool bezier);
 };

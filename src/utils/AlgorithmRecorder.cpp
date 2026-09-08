@@ -31,7 +31,7 @@ void AlgorithmRecorder::record_polygon(
 }
 
 void AlgorithmRecorder::record_highlight_point(pt p, glm::vec4 color) {
-    current_frame_commands.push_back({DRAW_HIGHLIGHT_POINT, {p}, color});
+    current_frame_commands.push_back({DRAW_HIGHLIGHT, {p}, color});
 }
 
 void AlgorithmRecorder::record_circle(pt center, float radius, glm::vec4 fill_color, glm::vec4 border_color) {
@@ -62,22 +62,8 @@ void AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>
 
     for (int u = 0; u < n; u++) {
         for (auto& [v,w] : adj[u]) {
-            // TODO: draw quadratic bezier for this if layout is force directed
-
-            ld ang = atan2(pos[v].y-pos[u].y, pos[v].x-pos[u].x);
-            pt start = pos[u];
-            start.x += node_radius*cos(ang);
-            start.y += node_radius*sin(ang);
-
-            pt end = pos[v];
-            end.x -= node_radius*cos(ang);
-            end.y -= node_radius*sin(ang);
-
-            record_line(start, end);
-            
-            if (directed) draw_arrow_head(start, end, node_radius);
-
-            pt mid((pos[u].x + pos[v].x) / 2, (pos[u].y + pos[v].y) / 2);
+            bool bezier = layout_type == GraphLayoutType::FORCE_DIRECTED;
+            pt mid = draw_edge(pos, u, v, node_radius, directed, bezier);
             record_text(to_string(w), mid, BLACK);
         }
     }
@@ -104,69 +90,8 @@ vector<pt> AlgorithmRecorder::record_unweighted_graph(const vector<vector<int>> 
 
     for (int u = 0; u < n; u++) {
         for (int v : adj[u]) {
-            if (layout_type == GraphLayoutType::FORCE_DIRECTED){
-                ld ang = atan2(pos[v].y - pos[u].y, pos[v].x - pos[u].x) + M_PI_2;
-                ld d = dist(pos[u], pos[v]);
-                pt mid = (pos[u] + pos[v])/2.0;
-
-                pt ctrl = mid;
-                ctrl.x += cos(ang) * 0.3 * d;
-                ctrl.y += sin(ang) * 0.3 * d;
-
-                for (int i = 0; i < n; i++) {
-                    if (i == u || i == v) continue;
-                    
-                    ld dx = ctrl.x - pos[i].x;
-                    ld dy = ctrl.y - pos[i].y;
-                    ld d = sqrt(dx*dx + dy*dy);
-                    
-                    ld safe_dist = node_radius * 4.0f; 
-                    if (d < safe_dist && d > 1e-3f) {
-                        ld push = (safe_dist - d) * 0.8f;
-                        ctrl.x += (dx / d) * push;
-                        ctrl.y += (dy / d) * push;
-                    }
-                }
-
-                ld ang_start = atan2(ctrl.y - pos[u].y, ctrl.x - pos[u].x);
-                pt start = pos[u];
-                start.x += node_radius * cos(ang_start);
-                start.y += node_radius * sin(ang_start);
-
-                ld ang_end = atan2(pos[v].y - ctrl.y, pos[v].x - ctrl.x);
-                pt end = pos[v];
-                end.x -= node_radius * cos(ang_end);
-                end.y -= node_radius * sin(ang_end);
-
-                auto f = [&](ld t) -> pt {
-                    return start*(1-t)*(1-t) + ctrl*2*(1-t)*t + end*t*t;
-                };
-
-                const int segments = 20;
-                vector<pt> curve(segments);
-                curve[0] = start;
-                curve[segments-1] = end;
-
-                for (int i = 1; i < segments-1; i++){
-                    curve[i] = f(i / (segments-1.0));
-                }
-
-                for (int i = 0; i < segments-1; i++){
-                    record_line(curve[i], curve[i+1]);
-                }
-                if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius);
-            } else {
-                ld ang = atan2(pos[v].y - pos[u].y, pos[v].x - pos[u].x);
-                pt start = pos[u];
-                start.x += node_radius*cos(ang);
-                start.y += node_radius*sin(ang);
-                pt end = pos[v];
-                end.x -= node_radius*cos(ang);
-                end.y -= node_radius*sin(ang);
-                
-                record_line(start, end);
-                if (directed) draw_arrow_head(start, end, node_radius);
-            }
+            bool bezier = layout_type == GraphLayoutType::FORCE_DIRECTED;
+            draw_edge(pos, u, v, node_radius, directed, bezier);
         }
     }
 
@@ -181,12 +106,12 @@ void AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
     int n = sz(adj);
     if (n == 0) return;
 
-    const float node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
+    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
 
     vector<pt> pos(n);
     vector<int> dep(n), subtree_width(n);
 
-    auto compute_tree_metrics = [&](auto&& self, int u, int p, int d) -> int {
+    auto get_tree_width = [&](auto&& self, int u, int p, int d) -> int {
         dep[u] = d;
         int width = 0;
         for (int v : adj[u]) if (v != p) {
@@ -195,12 +120,11 @@ void AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
         subtree_width[u] = max(1, width);
         return subtree_width[u];
     };
-    compute_tree_metrics(compute_tree_metrics, root, -1, 0);
+    get_tree_width(get_tree_width, root, -1, 0);
 
-    auto assign_positions = [&](auto& self, int u, int p, float minx, float maxx) -> void {
+    auto assign_pos = [&](auto& self, int u, int p, float minx, float maxx) -> void {
         pos[u].x = (minx + maxx)/2;
         pos[u].y = grid_maxy - 2*node_radius - 3*node_radius*dep[u];
-
         float x = minx;
         for (int v : adj[u]) if (v != p) {
             float slice = (maxx - minx) * ((ld)subtree_width[v] / subtree_width[u]);
@@ -208,7 +132,7 @@ void AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
             x += slice;
         }
     };
-    assign_positions(assign_positions, root, -1, -80.0f, 80.0f);
+    assign_pos(assign_pos, root, -1, 0.8*grid_minx, 0.8*grid_maxx);
 
     auto draw_edges = [&](auto& self, int u, int p) -> void {
         for (int v : adj[u]) if (v != p) {
@@ -243,7 +167,7 @@ void AlgorithmRecorder::clear() {
     current_frame = 0;
 }
 
-void AlgorithmRecorder::run(int time_ms) {
+void AlgorithmRecorder::run(int frametime_ms) {
     bool space_prev = false;
     bool enter_prev = false;
     bool autoplay = false;
@@ -276,7 +200,7 @@ void AlgorithmRecorder::run(int time_ms) {
 
         if (autoplay && !timeline.empty()) {
             double cur_time = glfwGetTime();
-            if (cur_time - last_time > time_ms/1000.0) {
+            if (cur_time - last_time > frametime_ms/1000.0) {
                 current_frame = (current_frame + 1) % timeline.size();
                 last_time = cur_time;
             }
@@ -292,32 +216,22 @@ void AlgorithmRecorder::run(int time_ms) {
                     vis.draw_line(cmd.points[0], cmd.points[1], cmd.color);
                 } else if (cmd.type == DRAW_POLYGON) {
                     vis.draw_polygon(cmd.points, cmd.color);
-                } else if (cmd.type == DRAW_HIGHLIGHT_POINT) {
-                    vis.draw_point(cmd.points[0], cmd.color);
-                    float pulse = (sin((float)glfwGetTime() * 8.0f) + 1.0f) * 0.5f;
-                    float r = 4.0f + (pulse * 3.0f);
-                    int segments = 20;
-                    for (int s = 0; s < segments; s++) {
-                        float a1 = 2*M_PI * s/segments;
-                        float a2 = 2*M_PI * (s+1)/segments;
-                        pt p1(cmd.points[0].x + r*cos(a1), cmd.points[0].y + r*sin(a1));
-                        pt p2(cmd.points[0].x + r*cos(a2), cmd.points[0].y + r*sin(a2));
+                } else if (cmd.type == DRAW_HIGHLIGHT) {
+                    ld pulse = (sin(8*glfwGetTime()) + 1)*0.5;
+                    ld r = 4.0 + (pulse * 3.0);
+                    vector<pt> circle = get_circle_polygon(cmd.points[0], r);
+                    for (int i = 0; i < (int)circle.size(); i++){
+                        pt p1 = circle[i];
+                        pt p2 = circle[(i+1)%circle.size()];
                         vis.draw_line(p1, p2, RED);
                     }
                 } else if (cmd.type == DRAW_CIRCLE) {
-                    int segments = 20;
-                    pt center = cmd.points[0];
-                    float r = cmd.radius;
-
-                    vector<pt> circle_poly;
-                    for (int s = 0; s < segments; s++) {
-                        float ang = 2*M_PI * s/segments;
-                        circle_poly.push_back(pt(center.x + r*cos(ang), center.y + r*sin(ang)));
-                    }
-                    vis.draw_polygon(circle_poly, cmd.color);
-                    
-                    for (int s = 0; s < segments; s++) {
-                        vis.draw_line(circle_poly[s], circle_poly[(s+1)%segments], cmd.secondary_color);
+                    vector<pt> circle = get_circle_polygon(cmd.points[0], cmd.radius);
+                    vis.draw_polygon(circle, cmd.color);
+                    for (int i = 0; i < (int)circle.size(); i++){
+                        pt p1 = circle[i];
+                        pt p2 = circle[(i+1)%circle.size()];
+                        vis.draw_line(p1, p2, cmd.secondary_color);
                     }
                 } else if (cmd.type == DRAW_RECTANGLE) {
                     pt bl = cmd.points[0];
@@ -577,4 +491,73 @@ void AlgorithmRecorder::draw_arrow_head(pt from, pt to, ld node_radius) {
     pt left(tip.x - len*cos(angle - M_PI/10), tip.y - len * sin(angle - M_PI/10));
     pt right(tip.x -len*cos(angle + M_PI/10), tip.y - len * sin(angle + M_PI/10));
     record_polygon({tip, left, right}, BLACK, BLACK, TRANSPARENT);
+}
+
+pt AlgorithmRecorder::draw_edge(const vector<pt> &pos, int u, int v, const ld node_radius, bool directed, bool bezier){
+    if (!bezier){
+        ld ang = atan2(pos[v].y - pos[u].y, pos[v].x - pos[u].x);
+        pt start = pos[u];
+        start.x += node_radius*cos(ang);
+        start.y += node_radius*sin(ang);
+        pt end = pos[v];
+        end.x -= node_radius*cos(ang);
+        end.y -= node_radius*sin(ang);
+        
+        record_line(start, end);
+        if (directed) draw_arrow_head(start, end, node_radius);
+        return (pos[u]+pos[v])/2.0;
+    }
+
+    ld ang = atan2(pos[v].y - pos[u].y, pos[v].x - pos[u].x) + M_PI_2;
+    ld d = dist(pos[u], pos[v]);
+    pt mid = (pos[u] + pos[v])/2.0;
+
+    pt ctrl = mid;
+    ctrl.x += cos(ang) * 0.3 * d;
+    ctrl.y += sin(ang) * 0.3 * d;
+
+    for (int i = 0; i < (int)pos.size(); i++) {
+        if (i == u || i == v) continue;
+        
+        ld dx = ctrl.x - pos[i].x;
+        ld dy = ctrl.y - pos[i].y;
+        ld d = sqrt(dx*dx + dy*dy);
+        
+        ld safe_dist = node_radius * 4.0f; 
+        if (d < safe_dist && d > 1e-3f) {
+            ld push = (safe_dist - d) * 0.8f;
+            ctrl.x += (dx / d) * push;
+            ctrl.y += (dy / d) * push;
+        }
+    }
+
+    ld ang_start = atan2(ctrl.y - pos[u].y, ctrl.x - pos[u].x);
+    pt start = pos[u];
+    start.x += node_radius * cos(ang_start);
+    start.y += node_radius * sin(ang_start);
+
+    ld ang_end = atan2(pos[v].y - ctrl.y, pos[v].x - ctrl.x);
+    pt end = pos[v];
+    end.x -= node_radius * cos(ang_end);
+    end.y -= node_radius * sin(ang_end);
+
+    auto f = [&](ld t) -> pt {
+        return start*(1-t)*(1-t) + ctrl*2*(1-t)*t + end*t*t;
+    };
+
+    const int segments = 20;
+    vector<pt> curve(segments);
+    curve[0] = start;
+    curve[segments-1] = end;
+
+    for (int i = 1; i < segments-1; i++){
+        curve[i] = f(i / (segments-1.0));
+    }
+
+    for (int i = 0; i < segments-1; i++){
+        record_line(curve[i], curve[i+1]);
+    }
+    if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius);
+    
+    return f(0.5); // mid point to draw weight
 }
