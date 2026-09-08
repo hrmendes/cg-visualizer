@@ -24,6 +24,20 @@ int main(){
     recorder.record_tree(adj,true);
     recorder.commit_step();
 
+    adj = random_bipartite_graph(10,10);
+    recorder.record_unweighted_graph(adj,false,AlgorithmRecorder::GraphLayoutType::BIPARTITE);
+    recorder.commit_step();
+
+
+    adj = random_bipartite_graph(10,10);
+    recorder.record_unweighted_graph(adj,false,AlgorithmRecorder::GraphLayoutType::BIPARTITE);
+    recorder.commit_step();
+
+
+    adj = random_dag(10,20);
+    recorder.record_unweighted_graph(adj,false,AlgorithmRecorder::GraphLayoutType::FORCE_DIRECTED);
+    recorder.commit_step();
+
     recorder.run();
     return 0;
 }

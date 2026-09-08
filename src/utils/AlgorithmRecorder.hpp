@@ -73,7 +73,7 @@ public:
     
     void commit_step();
     void clear();
-    void run();
+    void run(int time_ms = 500);
 
 private:
     vector<Command> current_frame_commands;
@@ -84,5 +84,5 @@ private:
     void draw_grid(float step = 20.0f);
     void draw_axis();
     vector<pt> compute_layout(int n, const vector<vector<pair<int, int>>>& adj, GraphLayoutType layout_type);
-    void draw_arrow_head(pt from, pt to);
+    void draw_arrow_head(pt from, pt to, ld node_radius);
 };
