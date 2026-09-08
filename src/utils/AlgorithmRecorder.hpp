@@ -65,11 +65,12 @@ public:
     void record_highlight_point(pt p, glm::vec4 color = RED);
     void record_circle(pt center, float radius, glm::vec4 fill_color = LIGHT_GRAY, glm::vec4 border_color = BLACK);
     void record_rectangle(pt bottom_left, pt top_right, glm::vec4 fill_color = LIGHT_GRAY, glm::vec4 border_color = BLACK);
-    void record_text(string text, pt position, glm::vec4 color = BLACK);
+    void record_text(const string &text, pt position, float font_size, glm::vec4 color = BLACK);
     void record_log(string log_msg);
-    void record_weighted_graph(const vector<vector<pair<int, int>>> &adj, bool directed = false, GraphLayoutType layout_type = CIRCULAR);
+    vector<pt> record_weighted_graph(const vector<vector<pair<int, int>>> &adj, bool directed = false, GraphLayoutType layout_type = CIRCULAR);
     vector<pt> record_unweighted_graph(const vector<vector<int>> &adj, bool directed = false, GraphLayoutType layout_type = CIRCULAR);
-    void record_tree(const vector<vector<int>> &adj, int root = 0);
+    vector<pt> record_tree(const vector<vector<int>> &adj, int root = 0);
+    vector<pt> record_weighted_tree(const vector<vector<pair<int,int>>> &adj, int root = 0);
     
     void commit_step();
     void clear();

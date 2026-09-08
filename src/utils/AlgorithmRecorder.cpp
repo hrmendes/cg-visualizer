@@ -42,10 +42,9 @@ void AlgorithmRecorder::record_rectangle(pt bottom_left, pt top_right, glm::vec4
     current_frame_commands.push_back({DRAW_RECTANGLE, {bottom_left, top_right}, fill_color, border_color, 0.0f, ""});
 }
 
-void AlgorithmRecorder::record_text(string text, pt position, glm::vec4 color) {
-    // TODO: deal with text rendering
+void AlgorithmRecorder::record_text(const string &text, pt position, float font_size, glm::vec4 color) {
     current_frame_commands.push_back({
-        DRAW_TEXT, {position}, color, TRANSPARENT, 0.0f, text
+        DRAW_TEXT, {position}, color, TRANSPARENT, font_size, text
     });
 }
 
@@ -53,9 +52,9 @@ void AlgorithmRecorder::record_log(string log_msg) {
     current_frame_commands.push_back({LOG, {}, TRANSPARENT, TRANSPARENT, 0, log_msg});
 }
 
-void AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>>> &adj, bool directed, GraphLayoutType layout_type) {
+vector<pt> AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>>> &adj, bool directed, GraphLayoutType layout_type) {
     int n = sz(adj);
-    if (n == 0) return;
+    if (n == 0) return {};
 
     const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
     vector<pt> pos = compute_layout(n, adj, layout_type);
@@ -64,14 +63,21 @@ void AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>
         for (auto& [v,w] : adj[u]) {
             bool bezier = layout_type == GraphLayoutType::FORCE_DIRECTED;
             pt mid = draw_edge(pos, u, v, node_radius, directed, bezier);
-            record_text(to_string(w), mid, BLACK);
+            mid.x -= to_string(w).size()*(node_radius/4.0);
+            mid.y -= node_radius/4;
+            record_text(to_string(w), mid, 0.7*node_radius, BLACK);
         }
     }
 
     for (int i = 0; i < n; i++) {
         record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        record_text(to_string(i), pos[i], BLACK);
+        pt mid = pos[i];
+        mid.x -= to_string(i).size()*(node_radius/4.0);
+        mid.y -= node_radius/4;
+        record_text(to_string(i), mid, node_radius, BLACK);
     }
+
+    return pos;
 }
 
 vector<pt> AlgorithmRecorder::record_unweighted_graph(const vector<vector<int>> &adj, bool directed, GraphLayoutType layout_type) {
@@ -97,30 +103,32 @@ vector<pt> AlgorithmRecorder::record_unweighted_graph(const vector<vector<int>> 
 
     for (int i = 0; i < n; i++) {
         record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        record_text(to_string(i), pos[i], BLACK);
+        pt mid = pos[i];
+        mid.x -= to_string(i).size()*(node_radius/4.0);
+        mid.y -= node_radius/4;
+        record_text(to_string(i), mid, node_radius, BLACK);
     }
     return pos;
 }
 
-void AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
+vector<pt> AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
     int n = sz(adj);
-    if (n == 0) return;
+    if (n == 0) return {};
 
     const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
 
     vector<pt> pos(n);
     vector<int> dep(n), subtree_width(n);
 
-    auto get_tree_width = [&](auto&& self, int u, int p, int d) -> int {
-        dep[u] = d;
+    auto get_tree_width = [&](auto&& self, int u, int p) -> int {
         int width = 0;
         for (int v : adj[u]) if (v != p) {
-            width += self(self, v, u, d + 1);
+            dep[v] = dep[u] + 1;
+            width += self(self, v, u);
         }
-        subtree_width[u] = max(1, width);
-        return subtree_width[u];
+        return subtree_width[u] = max(1, width);
     };
-    get_tree_width(get_tree_width, root, -1, 0);
+    get_tree_width(get_tree_width, root, -1);
 
     auto assign_pos = [&](auto& self, int u, int p, float minx, float maxx) -> void {
         pos[u].x = (minx + maxx)/2;
@@ -148,12 +156,81 @@ void AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
             self(self, v, u);
         }
     };
+
     draw_edges(draw_edges, root, -1);
 
     for (int i = 0; i < n; i++) {
         record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        record_text(to_string(i), pos[i], BLACK);
+        pt mid = pos[i];
+        mid.x -= to_string(i).size()*(node_radius/4.0);
+        mid.y -= node_radius/4;
+        record_text(to_string(i), mid, node_radius, BLACK);
     }
+    return pos;
+}
+
+vector<pt> AlgorithmRecorder::record_weighted_tree(const vector<vector<pair<int,int>>> &adj, int root){
+    int n = sz(adj);
+    if (n == 0) return {};
+
+    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
+
+    vector<pt> pos(n);
+    vector<int> dep(n), subtree_width(n);
+
+    auto get_tree_width = [&](auto&& self, int u, int p) -> int {
+        int width = 0;
+        for (auto [v,w] : adj[u]) if (v != p) {
+            dep[v] = dep[u] + 1;
+            width += self(self, v, u);
+        }
+        return subtree_width[u] = max(1, width);
+    };
+    get_tree_width(get_tree_width, root, -1);
+
+    auto assign_pos = [&](auto& self, int u, int p, float minx, float maxx) -> void {
+        pos[u].x = (minx + maxx)/2;
+        pos[u].y = grid_maxy - 2*node_radius - 3*node_radius*dep[u];
+        float x = minx;
+        for (auto [v,w] : adj[u]) if (v != p) {
+            float slice = (maxx - minx) * ((ld)subtree_width[v] / subtree_width[u]);
+            self(self, v, u, x, x + slice);
+            x += slice;
+        }
+    };
+    assign_pos(assign_pos, root, -1, 0.8*grid_minx, 0.8*grid_maxx);
+
+    auto draw_edges = [&](auto& self, int u, int p) -> void {
+        for (auto [v,w] : adj[u]) if (v != p) {
+            ld ang = atan2(pos[v].y-pos[u].y, pos[v].x-pos[u].x);
+            pt start = pos[u];
+            start.x += node_radius*cos(ang);
+            start.y += node_radius*sin(ang);
+
+            pt end = pos[v];
+            end.x -= node_radius*cos(ang);
+            end.y -= node_radius*sin(ang);
+            record_line(start, end, BLACK);
+
+            pt mid = (start+end)/2.0;
+            mid.x -= to_string(w).size()*(node_radius/4.0);
+            mid.y -= node_radius/4;
+            record_text(to_string(w), mid, 0.7*node_radius, BLACK);
+
+            self(self, v, u);
+        }
+    };
+
+    draw_edges(draw_edges, root, -1);
+
+    for (int i = 0; i < n; i++) {
+        record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
+        pt mid = pos[i];
+        mid.x -= to_string(i).size()*(node_radius/4.0);
+        mid.y -= node_radius/4;
+        record_text(to_string(i), mid, node_radius, BLACK);
+    }
+    return pos;
 }
 
 void AlgorithmRecorder::commit_step() {
@@ -242,7 +319,7 @@ void AlgorithmRecorder::run(int frametime_ms) {
                         vis.draw_line(rect[s], rect[(s + 1) % 4], cmd.secondary_color);
                     }
                 } else if (cmd.type == DRAW_TEXT) {
-                    // TODO: deal with text rendering
+                    vis.draw_text(cmd.text, cmd.points[0], cmd.radius, cmd.color);
                 } else if (cmd.type == LOG) {
                     cout << "[LOG]: " << cmd.text << endl;
                 }

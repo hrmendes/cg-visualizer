@@ -8,10 +8,14 @@
 #include "VkBootstrap.h"
 #include <iostream>
 
-
 #include "../geom/triangulation.hpp"
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "../utils/stb_truetype.h"
 
-// Estrutura interna para não vazar dependências Vulkan para a main
+// Mantemos apenas o array de caracteres em CPU estático
+static stbtt_bakedchar s_cdata[96];
+
+// Estrutura interna sem duplicatas
 struct VulkanState {
     GLFWwindow* window;
     VkInstance instance;
@@ -38,9 +42,19 @@ struct VulkanState {
     VkSemaphore renderFinishedSemaphore;
     VkFence inFlightFence;
 
-    // Vertex Buffer dinâmico (alocado no init com tamanho fixo grande, ex: 10MB)
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
+
+    // Recursos exclusivos para Texto
+    VkImage fontImage;
+    VkDeviceMemory fontMemory;
+    VkImageView fontImageView;
+    VkSampler fontSampler;
+    VkPipeline graphicsPipelineText;
+    VkPipelineLayout textPipelineLayout;
+    VkDescriptorSetLayout textDescriptorSetLayout;
+    VkDescriptorPool textDescriptorPool;
+    VkDescriptorSet textDescriptorSet;
 };
 
 bool Visualizer::is_key_pressed(int key){
@@ -68,9 +82,7 @@ static VkShaderModule create_shader_module(VkDevice device, const std::vector<ch
     return shaderModule;
 }
 
-// 1. Criação única do Render Pass, Framebuffers e Layout
 void Visualizer::init_render_resources() {
-    // Render Pass
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = vkState->swapChainImageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -99,7 +111,6 @@ void Visualizer::init_render_resources() {
 
     vkCreateRenderPass(vkState->device, &renderPassInfo, nullptr, &vkState->renderPass);
 
-    // Framebuffers
     vkState->swapChainFramebuffers.resize(vkState->swapChainImageViews.size());
     for (size_t i = 0; i < vkState->swapChainImageViews.size(); i++) {
         VkFramebufferCreateInfo framebufferInfo{};
@@ -113,7 +124,6 @@ void Visualizer::init_render_resources() {
         vkCreateFramebuffer(vkState->device, &framebufferInfo, nullptr, &vkState->swapChainFramebuffers[i]);
     }
 
-    // Pipeline Layout
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
@@ -126,10 +136,10 @@ void Visualizer::init_render_resources() {
     vkCreatePipelineLayout(vkState->device, &pipelineLayoutInfo, nullptr, &vkState->pipelineLayout);
 }
 
-// 2. Função auxiliar limpa apenas para o Pipeline
-VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
-    auto vertShaderCode = read_file("src/vulkan_renderer/shaders/vert.spv");
-    auto fragShaderCode = read_file("src/vulkan_renderer/shaders/frag.spv");
+// create_pipeline atualizado para receber caminhos e layout específicos
+VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState, const std::string& vertPath, const std::string& fragPath, VkPipelineLayout layout) {
+    auto vertShaderCode = read_file(vertPath);
+    auto fragShaderCode = read_file(fragPath);
 
     VkShaderModule vertShaderModule = create_shader_module(vkState->device, vertShaderCode);
     VkShaderModule fragShaderModule = create_shader_module(vkState->device, fragShaderCode);
@@ -153,7 +163,8 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+    // Atualizado para 3 atributos (Posição, UV e Cor)
+    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
@@ -161,8 +172,13 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
 
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
+    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, uv);
+
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[2].offset = offsetof(Vertex, color);
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -227,7 +243,7 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = vkState->pipelineLayout;
+    pipelineInfo.layout = layout; // Usa o layout parametrizado
     pipelineInfo.renderPass = vkState->renderPass;
     pipelineInfo.subpass = 0;
 
@@ -240,22 +256,271 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState) {
 }
 
 void Visualizer::init_pipelines() {
-    init_render_resources(); // Cria render pass, framebuffers e layout uma única vez
+    init_render_resources();
     
-    vkState->graphicsPipelineTriangles = create_pipeline(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, vkState);
-    vkState->graphicsPipelineLines     = create_pipeline(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, vkState);
-    vkState->graphicsPipelinePoints    = create_pipeline(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, vkState);
+    std::string vert = "src/vulkan_renderer/shaders/vert.spv";
+    std::string frag = "src/vulkan_renderer/shaders/frag.spv";
+
+    vkState->graphicsPipelineTriangles = create_pipeline(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, vkState, vert, frag, vkState->pipelineLayout);
+    vkState->graphicsPipelineLines     = create_pipeline(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, vkState, vert, frag, vkState->pipelineLayout);
+    vkState->graphicsPipelinePoints    = create_pipeline(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, vkState, vert, frag, vkState->pipelineLayout);
+    
+    init_text_pipeline();
+}
+
+void Visualizer::init_text_pipeline() {
+    int bitmap_w = 512;
+    int bitmap_h = 512;
+    std::vector<unsigned char> bitmap(bitmap_w * bitmap_h);
+
+    std::string font_path = "assets/fonts/JetBrainsMono.ttf";
+    std::ifstream file(font_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        std::cerr << "AVISO: Nao foi possivel abrir a fonte em " << font_path << std::endl;
+        return;
+    }
+    std::streamsize file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    std::vector<char> font_buffer(file_size);
+    file.read(font_buffer.data(), file_size);
+
+    stbtt_BakeFontBitmap((unsigned char*)font_buffer.data(), 0, 32.0f, bitmap.data(), bitmap_w, bitmap_h, 32, 96, s_cdata);
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = bitmap_w;
+    imageInfo.extent.height = bitmap_h;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_R8_UNORM;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateImage(vkState->device, &imageInfo, nullptr, &vkState->fontImage);
+
+    VkMemoryRequirements memRequirements;
+    vkGetImageMemoryRequirements(vkState->device, vkState->fontImage, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(vkState->physicalDevice, &memProperties);
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((memRequirements.memoryTypeBits & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+            allocInfo.memoryTypeIndex = i;
+            break;
+        }
+    }
+
+    vkAllocateMemory(vkState->device, &allocInfo, nullptr, &vkState->fontMemory);
+    vkBindImageMemory(vkState->device, vkState->fontImage, vkState->fontMemory, 0);
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = bitmap_w * bitmap_h;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    vkCreateBuffer(vkState->device, &bufferInfo, nullptr, &stagingBuffer);
+
+    vkGetBufferMemoryRequirements(vkState->device, stagingBuffer, &memRequirements);
+    allocInfo.allocationSize = memRequirements.size;
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((memRequirements.memoryTypeBits & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))) {
+            allocInfo.memoryTypeIndex = i;
+            break;
+        }
+    }
+    vkAllocateMemory(vkState->device, &allocInfo, nullptr, &stagingBufferMemory);
+    vkBindBufferMemory(vkState->device, stagingBuffer, stagingBufferMemory, 0);
+
+    void* data;
+    vkMapMemory(vkState->device, stagingBufferMemory, 0, bufferInfo.size, 0, &data);
+    memcpy(data, bitmap.data(), (size_t)bufferInfo.size);
+    vkUnmapMemory(vkState->device, stagingBufferMemory);
+
+    // --- INÍCIO DA CÓPIA E TRANSIÇÃO DE LAYOUT ---
+    VkCommandBufferAllocateInfo allocInfoCmd{};
+    allocInfoCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfoCmd.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfoCmd.commandPool = vkState->commandPool;
+    allocInfoCmd.commandBufferCount = 1;
+
+    VkCommandBuffer tempCmdBuffer;
+    vkAllocateCommandBuffers(vkState->device, &allocInfoCmd, &tempCmdBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(tempCmdBuffer, &beginInfo);
+
+    // 1. Transição: UNDEFINED -> TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = vkState->fontImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(tempCmdBuffer, 
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    // 2. Copiar Staging Buffer para a VkImage
+    VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = { (uint32_t)bitmap_w, (uint32_t)bitmap_h, 1 };
+
+    vkCmdCopyBufferToImage(tempCmdBuffer, stagingBuffer, vkState->fontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    // 3. Transição: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(tempCmdBuffer, 
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    vkEndCommandBuffer(tempCmdBuffer);
+
+    // Submeter e aguardar a GPU terminar
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &tempCmdBuffer;
+
+    vkQueueSubmit(vkState->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(vkState->graphicsQueue);
+
+    vkFreeCommandBuffers(vkState->device, vkState->commandPool, 1, &tempCmdBuffer);
+    // --- FIM DA CÓPIA E TRANSIÇÃO ---
+
+    vkDestroyBuffer(vkState->device, stagingBuffer, nullptr);
+    vkFreeMemory(vkState->device, stagingBufferMemory, nullptr);
+
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = vkState->fontImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    vkCreateImageView(vkState->device, &viewInfo, nullptr, &vkState->fontImageView);
+
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    vkCreateSampler(vkState->device, &samplerInfo, nullptr, &vkState->fontSampler);
+
+    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerLayoutBinding;
+    vkCreateDescriptorSetLayout(vkState->device, &layoutInfo, nullptr, &vkState->textDescriptorSetLayout);
+
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.maxSets = 1; // Corrigido erro de validação
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    vkCreateDescriptorPool(vkState->device, &poolInfo, nullptr, &vkState->textDescriptorPool);
+
+    VkDescriptorSetAllocateInfo allocSetInfo{};
+    allocSetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocSetInfo.descriptorPool = vkState->textDescriptorPool;
+    allocSetInfo.descriptorSetCount = 1;
+    allocSetInfo.pSetLayouts = &vkState->textDescriptorSetLayout;
+    vkAllocateDescriptorSets(vkState->device, &allocSetInfo, &vkState->textDescriptorSet);
+
+    VkDescriptorImageInfo imageDescInfo{};
+    imageDescInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageDescInfo.imageView = vkState->fontImageView;
+    imageDescInfo.sampler = vkState->fontSampler;
+
+    VkWriteDescriptorSet descriptorWrite{};
+    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrite.dstSet = vkState->textDescriptorSet;
+    descriptorWrite.dstBinding = 0;
+    descriptorWrite.dstArrayElement = 0;
+    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrite.descriptorCount = 1;
+    descriptorWrite.pImageInfo = &imageDescInfo;
+    vkUpdateDescriptorSets(vkState->device, 1, &descriptorWrite, 0, nullptr);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &vkState->textDescriptorSetLayout;
+    
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(glm::mat4);
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    vkCreatePipelineLayout(vkState->device, &pipelineLayoutInfo, nullptr, &vkState->textPipelineLayout);
+
+    // Pipeline exclusivo de texto usa text_frag.spv
+    std::string vert = "src/vulkan_renderer/shaders/vert.spv";
+    std::string text_frag = "src/vulkan_renderer/shaders/text_frag.spv";
+
+    vkState->graphicsPipelineText = create_pipeline(
+        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 
+        vkState, 
+        vert, 
+        text_frag, 
+        vkState->textPipelineLayout
+    );
 }
 
 void Visualizer::init(int width, int height) {
     vkState = new VulkanState();
     
-    // 1. Inicializar GLFW
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     vkState->window = glfwCreateWindow(width, height, "GeomVulkan", nullptr, nullptr);
 
-    // 2. Criar Instance (vk-bootstrap)
     vkb::InstanceBuilder builder;
     auto inst_ret = builder.set_app_name("GeomVulkan")
         .request_validation_layers(true)
@@ -265,23 +530,19 @@ void Visualizer::init(int width, int height) {
     vkState->instance = vkb_inst.instance;
     vkState->debug_messenger = vkb_inst.debug_messenger;
 
-    // 3. Criar Surface
     glfwCreateWindowSurface(vkState->instance, vkState->window, nullptr, &vkState->surface);
 
-    // 4. Selecionar GPU Física
     vkb::PhysicalDeviceSelector selector{vkb_inst};
     auto phys_ret = selector.set_surface(vkState->surface)
         .set_minimum_version(1, 3)
-        .prefer_gpu_device_type(vkb::PreferredDeviceType::integrated) // Força a Intel iGPU
+        .prefer_gpu_device_type(vkb::PreferredDeviceType::integrated)
         .select();
     
     vkb::PhysicalDevice vkb_phys_dev = phys_ret.value();
     vkState->physicalDevice = vkb_phys_dev.physical_device;
 
-    // Imprime a GPU para confirmar
     std::cout << ">> GPU Selecionada: " << vkb_phys_dev.name << std::endl;
 
-    // 5. Criar Logical Device
     vkb::DeviceBuilder dev_builder{vkb_phys_dev};
     auto dev_ret = dev_builder.build();
     
@@ -296,7 +557,6 @@ void Visualizer::init(int width, int height) {
     vkState->graphicsQueue = vkb_device.get_queue(vkb::QueueType::graphics).value();
     vkState->presentQueue = vkb_device.get_queue(vkb::QueueType::present).value();
 
-    // 6. Criar Swapchain
     vkb::SwapchainBuilder swapchain_builder{vkb_device};
     auto swap_ret = swapchain_builder.build();
     vkb::Swapchain vkb_swapchain = swap_ret.value();
@@ -306,10 +566,9 @@ void Visualizer::init(int width, int height) {
     vkState->swapChainImageFormat = vkb_swapchain.image_format;
     vkState->swapChainExtent = vkb_swapchain.extent;
 
-    // 7. Sincronização (Resolve o Segfault)
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // Crucial: Inicia sinalizada
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; 
     vkCreateFence(vkState->device, &fenceInfo, nullptr, &vkState->inFlightFence);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
@@ -317,7 +576,6 @@ void Visualizer::init(int width, int height) {
     vkCreateSemaphore(vkState->device, &semaphoreInfo, nullptr, &vkState->imageAvailableSemaphore);
     vkCreateSemaphore(vkState->device, &semaphoreInfo, nullptr, &vkState->renderFinishedSemaphore);
 
-    // 8. Command Pool e Command Buffer
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -331,10 +589,9 @@ void Visualizer::init(int width, int height) {
     allocInfo.commandBufferCount = 1;
     vkAllocateCommandBuffers(vkState->device, &allocInfo, &vkState->commandBuffer);
 
-    // 9. Alocar Vertex Buffer de 10MB
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = 10 * 1024 * 1024; // 10 MB
+    bufferInfo.size = 10 * 1024 * 1024;
     bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     vkCreateBuffer(vkState->device, &bufferInfo, nullptr, &vkState->vertexBuffer);
@@ -346,7 +603,6 @@ void Visualizer::init(int width, int height) {
     allocMemInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocMemInfo.allocationSize = memRequirements.size;
 
-    // Encontrar tipo de memória visível para a CPU (Host Visible | Host Coherent)
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(vkState->physicalDevice, &memProperties);
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
@@ -364,12 +620,21 @@ void Visualizer::init(int width, int height) {
 }
 
 void Visualizer::cleanup() {
-    if (!vkState) {
-        return;
-    }
+    if (!vkState) return;
 
     if (vkState->device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(vkState->device);
+
+        // Limpeza dos recursos de Texto (resolve o Memory Leak)
+        if (vkState->graphicsPipelineText != VK_NULL_HANDLE) vkDestroyPipeline(vkState->device, vkState->graphicsPipelineText, nullptr);
+        if (vkState->textPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(vkState->device, vkState->textPipelineLayout, nullptr);
+        if (vkState->textDescriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(vkState->device, vkState->textDescriptorSetLayout, nullptr);
+        if (vkState->textDescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(vkState->device, vkState->textDescriptorPool, nullptr);
+        
+        if (vkState->fontSampler != VK_NULL_HANDLE) vkDestroySampler(vkState->device, vkState->fontSampler, nullptr);
+        if (vkState->fontImageView != VK_NULL_HANDLE) vkDestroyImageView(vkState->device, vkState->fontImageView, nullptr);
+        if (vkState->fontImage != VK_NULL_HANDLE) vkDestroyImage(vkState->device, vkState->fontImage, nullptr);
+        if (vkState->fontMemory != VK_NULL_HANDLE) vkFreeMemory(vkState->device, vkState->fontMemory, nullptr);
     }
 
     // 1. Framebuffers
@@ -380,65 +645,49 @@ void Visualizer::cleanup() {
     }
     vkState->swapChainFramebuffers.clear();
 
-    // 2. Pipelines
+    // 2. Pipelines básicos
     if (vkState->graphicsPipelineTriangles != VK_NULL_HANDLE) {
         vkDestroyPipeline(vkState->device, vkState->graphicsPipelineTriangles, nullptr);
-        vkState->graphicsPipelineTriangles = VK_NULL_HANDLE;
     }
     if (vkState->graphicsPipelineLines != VK_NULL_HANDLE) {
         vkDestroyPipeline(vkState->device, vkState->graphicsPipelineLines, nullptr);
-        vkState->graphicsPipelineLines = VK_NULL_HANDLE;
     }
     if (vkState->graphicsPipelinePoints != VK_NULL_HANDLE) {
         vkDestroyPipeline(vkState->device, vkState->graphicsPipelinePoints, nullptr);
-        vkState->graphicsPipelinePoints = VK_NULL_HANDLE;
     }
 
-    // 3. Pipeline Layout
     if (vkState->pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(vkState->device, vkState->pipelineLayout, nullptr);
-        vkState->pipelineLayout = VK_NULL_HANDLE;
     }
 
-    // 4. Render Pass
     if (vkState->renderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(vkState->device, vkState->renderPass, nullptr);
-        vkState->renderPass = VK_NULL_HANDLE;
     }
 
-    // 5. Vertex Buffers e Memória (com proteção contra double-free / lixo)
     if (vkState && vkState->device != VK_NULL_HANDLE) {
         if (vkState->vertexBuffer != VK_NULL_HANDLE) {
             vkDestroyBuffer(vkState->device, vkState->vertexBuffer, nullptr);
-            vkState->vertexBuffer = VK_NULL_HANDLE;
         }
         if (vkState->vertexBufferMemory != VK_NULL_HANDLE) {
             vkFreeMemory(vkState->device, vkState->vertexBufferMemory, nullptr);
-            vkState->vertexBufferMemory = VK_NULL_HANDLE;
         }
     }
 
-    // 6. Destruir Sincronizações e Command Pool
     if (vkState && vkState->device != VK_NULL_HANDLE) {
         if (vkState->imageAvailableSemaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(vkState->device, vkState->imageAvailableSemaphore, nullptr);
-            vkState->imageAvailableSemaphore = VK_NULL_HANDLE;
         }
         if (vkState->renderFinishedSemaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(vkState->device, vkState->renderFinishedSemaphore, nullptr);
-            vkState->renderFinishedSemaphore = VK_NULL_HANDLE;
         }
         if (vkState->inFlightFence != VK_NULL_HANDLE) {
             vkDestroyFence(vkState->device, vkState->inFlightFence, nullptr);
-            vkState->inFlightFence = VK_NULL_HANDLE;
         }
         if (vkState->commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(vkState->device, vkState->commandPool, nullptr);
-            vkState->commandPool = VK_NULL_HANDLE;
         }
     }
 
-    // 7. Destruir Image Views e Swapchain
     if (vkState && vkState->device != VK_NULL_HANDLE) {
         for (auto imageView : vkState->swapChainImageViews) {
             if (imageView != VK_NULL_HANDLE) {
@@ -449,44 +698,34 @@ void Visualizer::cleanup() {
 
         if (vkState->swapChain != VK_NULL_HANDLE) {
             vkDestroySwapchainKHR(vkState->device, vkState->swapChain, nullptr);
-            vkState->swapChain = VK_NULL_HANDLE;
         }
     }
 
-    // 8. Destruir Dispositivo Lógico
     if (vkState && vkState->device != VK_NULL_HANDLE) {
         vkDestroyDevice(vkState->device, nullptr);
         vkState->device = VK_NULL_HANDLE;
     }
 
-    // 9. Debug Messenger, Superfície e Instância
     if (vkState->instance != VK_NULL_HANDLE) {
         auto destroyFn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(vkState->instance, "vkDestroyDebugUtilsMessengerEXT");
         if (destroyFn && vkState->debug_messenger != VK_NULL_HANDLE) {
             destroyFn(vkState->instance, vkState->debug_messenger, nullptr);
-            vkState->debug_messenger = VK_NULL_HANDLE;
         }
 
         if (vkState->surface != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(vkState->instance, vkState->surface, nullptr);
-            vkState->surface = VK_NULL_HANDLE;
         }
 
         vkDestroyInstance(vkState->instance, nullptr);
-        vkState->instance = VK_NULL_HANDLE;
     }
 
-    // 10. Janela e GLFW
     if (vkState->window != nullptr) {
         glfwDestroyWindow(vkState->window);
-        vkState->window = nullptr;
     }
     glfwTerminate();
 
-    // 11. Deletar estrutura de estado
     delete vkState;
     vkState = nullptr;
-
 }
 
 bool Visualizer::is_running() {
@@ -498,13 +737,12 @@ void Visualizer::clear_buffers() {
     points.clear();
     lines.clear();
     triangles.clear();
+    text_vertices.clear();
 }
 
 void Visualizer::render_frame(glm::mat4 proj) {
-    // 1. Aguardar a GPU terminar o frame anterior
     vkWaitForFences(vkState->device, 1, &vkState->inFlightFence, VK_TRUE, UINT64_MAX);
 
-    // 2. Adquirir a próxima imagem da Swapchain
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(vkState->device, vkState->swapChain, UINT64_MAX, vkState->imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     
@@ -519,28 +757,27 @@ void Visualizer::render_frame(glm::mat4 proj) {
     vkResetFences(vkState->device, 1, &vkState->inFlightFence);
     vkResetCommandBuffer(vkState->commandBuffer, 0);
 
-    // 3. Consolidar todos os vértices na CPU
     std::vector<Vertex> all_vertices;
     all_vertices.insert(all_vertices.end(), triangles.begin(), triangles.end());
+
     size_t lines_offset = all_vertices.size();
-    
     all_vertices.insert(all_vertices.end(), lines.begin(), lines.end());
+
     size_t points_offset = all_vertices.size();
-    
     all_vertices.insert(all_vertices.end(), points.begin(), points.end());
+
+    size_t text_offset = all_vertices.size();
+    all_vertices.insert(all_vertices.end(), text_vertices.begin(), text_vertices.end());
 
     VkDeviceSize bufferSize = sizeof(Vertex) * all_vertices.size();
 
-    // 4. Copiar para a memória da GPU
     if (bufferSize > 0){
-    void* data;
-        // Usa VK_WHOLE_SIZE para evitar violação de alinhamento na Intel
+        void* data;
         vkMapMemory(vkState->device, vkState->vertexBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
         memcpy(data, all_vertices.data(), (size_t)bufferSize);
         vkUnmapMemory(vkState->device, vkState->vertexBufferMemory);
     }
 
-    // 5. Iniciar gravação de comandos
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(vkState->commandBuffer, &beginInfo);
@@ -558,10 +795,6 @@ void Visualizer::render_frame(glm::mat4 proj) {
 
     vkCmdBeginRenderPass(vkState->commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipeline);
-    // vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipeline);
-
-    // 6. Viewport dinâmico (necessário se VK_DYNAMIC_STATE_VIEWPORT foi ativado)
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -576,16 +809,12 @@ void Visualizer::render_frame(glm::mat4 proj) {
     scissor.extent = vkState->swapChainExtent;
     vkCmdSetScissor(vkState->commandBuffer, 0, 1, &scissor);
 
-    // 7. Bind Vertex Buffer e Push Constants
     VkBuffer vertexBuffers[] = {vkState->vertexBuffer};
     VkDeviceSize offsets[] = {0};
     
-    // CORREÇÃO CRUCIAL PARA INTEL: Garanta que o binding aponta para o slot 0 com offset 0 exato
     vkCmdBindVertexBuffers(vkState->commandBuffer, 0, 1, vertexBuffers, offsets);
-
     vkCmdPushConstants(vkState->commandBuffer, vkState->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &proj[0][0]);
 
-    // 8. Calls de desenho dinâmico alterando a topologia
     if (!triangles.empty()) {
         vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipelineTriangles);
         vkCmdDraw(vkState->commandBuffer, static_cast<uint32_t>(triangles.size()), 1, 0, 0);
@@ -601,10 +830,16 @@ void Visualizer::render_frame(glm::mat4 proj) {
         vkCmdDraw(vkState->commandBuffer, static_cast<uint32_t>(points.size()), 1, static_cast<uint32_t>(points_offset), 0);
     }
 
+    if (!text_vertices.empty()) {
+        vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipelineText);
+        vkCmdBindDescriptorSets(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->textPipelineLayout, 0, 1, &vkState->textDescriptorSet, 0, nullptr);
+        
+        vkCmdDraw(vkState->commandBuffer, static_cast<uint32_t>(text_vertices.size()), 1, static_cast<uint32_t>(text_offset), 0);
+    }
+
     vkCmdEndRenderPass(vkState->commandBuffer);
     vkEndCommandBuffer(vkState->commandBuffer);
 
-    // 9. Submeter para a Fila (Queue)
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -622,7 +857,6 @@ void Visualizer::render_frame(glm::mat4 proj) {
 
     vkQueueSubmit(vkState->graphicsQueue, 1, &submitInfo, vkState->inFlightFence);
 
-    // 10. Apresentar na tela
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
@@ -636,4 +870,49 @@ void Visualizer::render_frame(glm::mat4 proj) {
     vkQueuePresentKHR(vkState->presentQueue, &presentInfo);
 
     glfwPollEvents();
+}
+
+void Visualizer::draw_point(pt p, glm::vec4 color) {
+    points.push_back({glm::vec2((float)p.x, (float)p.y), color, glm::vec2(0.0f)});
+}
+
+void Visualizer::draw_line(pt a, pt b, glm::vec4 color) {
+    lines.push_back({glm::vec2((float)a.x, (float)a.y), color, glm::vec2(0.0f)});
+    lines.push_back({glm::vec2((float)b.x, (float)b.y), color, glm::vec2(0.0f)});
+}
+
+void Visualizer::draw_polygon(const std::vector<pt>& poly, glm::vec4 color) {
+    if (poly.size() < 3) return;
+    for (auto t : triangulate(poly)) {
+        auto [p1,p2,p3] = t;
+        triangles.push_back({glm::vec2(p1.x, p1.y), color, glm::vec2(0.0f)});
+        triangles.push_back({glm::vec2(p2.x, p2.y), color, glm::vec2(0.0f)});
+        triangles.push_back({glm::vec2(p3.x, p3.y), color, glm::vec2(0.0f)});
+    }
+}
+
+void Visualizer::draw_text(const std::string& text, pt pos, float font_size, glm::vec4 color) {
+    float scale = font_size / 32.0f;
+    float cursor_x = 0.0f;
+    float cursor_y = 0.0f;
+
+    for (unsigned char ch : text) {
+        if (ch >= 32 && ch < 128) {
+            stbtt_aligned_quad q;
+            stbtt_GetBakedQuad(s_cdata, 512, 512, ch - 32, &cursor_x, &cursor_y, &q, 1);
+
+            float x0 = pos.x + q.x0 * scale;
+            float y0 = pos.y - q.y0 * scale;
+            float x1 = pos.x + q.x1 * scale;
+            float y1 = pos.y - q.y1 * scale;
+
+            text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
+            text_vertices.push_back({{x0, y1}, color, {q.s0, q.t1}});
+            text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
+
+            text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
+            text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
+            text_vertices.push_back({{x1, y0}, color, {q.s1, q.t0}});
+        }
+    }
 }

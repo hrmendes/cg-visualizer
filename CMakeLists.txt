@@ -53,6 +53,7 @@ set(SHADER_DIR
 
 set(VERT_SPV "${SHADER_DIR}/vert.spv")
 set(FRAG_SPV "${SHADER_DIR}/frag.spv")
+set(TEXT_FRAG_SPV "${SHADER_DIR}/text_frag.spv")
 
 
 add_custom_command(
@@ -64,21 +65,30 @@ add_custom_command(
     DEPENDS "${SHADER_DIR}/shader.vert"
 )
 
-
 add_custom_command(
     OUTPUT ${FRAG_SPV}
     COMMAND ${GLSLANG_VALIDATOR}
         -V
-        "${SHADER_DIR}/shader.frag"
+        "${SHADER_DIR}/frag.frag"
         -o ${FRAG_SPV}
-    DEPENDS "${SHADER_DIR}/shader.frag"
+    DEPENDS "${SHADER_DIR}/frag.frag"
 )
 
+# Comando para construir o novo shader do texto
+add_custom_command(
+    OUTPUT ${TEXT_FRAG_SPV}
+    COMMAND ${GLSLANG_VALIDATOR}
+        -V
+        "${SHADER_DIR}/text_frag.frag"
+        -o ${TEXT_FRAG_SPV}
+    DEPENDS "${SHADER_DIR}/text_frag.frag"
+)
 
 add_custom_target(shaders
     DEPENDS
         ${VERT_SPV}
         ${FRAG_SPV}
+        ${TEXT_FRAG_SPV}
 )
 
 

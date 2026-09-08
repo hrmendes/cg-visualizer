@@ -21,7 +21,7 @@ int main(){
     recorder.record_unweighted_graph(adj,true);
     recorder.commit_step();
 
-    recorder.record_tree(adj,true);
+    recorder.record_tree(adj);
     recorder.commit_step();
 
     adj = random_bipartite_graph(10,10);
@@ -36,6 +36,10 @@ int main(){
 
     adj = random_dag(10,20);
     recorder.record_unweighted_graph(adj,false,AlgorithmRecorder::GraphLayoutType::FORCE_DIRECTED);
+    recorder.commit_step();
+
+    auto wadj = random_weighted_graph(10,20,true);
+    recorder.record_weighted_graph(wadj,true,AlgorithmRecorder::GraphLayoutType::FORCE_DIRECTED);
     recorder.commit_step();
 
     recorder.run();

@@ -8,6 +8,7 @@
 struct Vertex {
     glm::vec2 pos;
     glm::vec4 color;
+    glm::vec2 uv;
 };
 
 class Visualizer {
@@ -20,30 +21,14 @@ public:
 
     ~Visualizer() { cleanup(); }
 
-    template<typename Pt>
-    void draw_point(Pt p, glm::vec4 color) {
-        points.push_back({glm::vec2((float)p.x, (float)p.y), color});
-    }
-
-    template<typename Pt>
-    void draw_line(Pt a, Pt b, glm::vec4 color) {
-        lines.push_back({glm::vec2((float)a.x, (float)a.y), color});
-        lines.push_back({glm::vec2((float)b.x, (float)b.y), color});
-    }
-
-    template<typename Pt>
-    void draw_polygon(const std::vector<Pt>& poly, glm::vec4 color) {
-        if (poly.size() < 3) return;
-        for (auto t : triangulate(poly)) {
-            auto [p1,p2,p3] = t;
-            triangles.push_back({glm::vec2(p1.x, p1.y), color});
-            triangles.push_back({glm::vec2(p2.x, p2.y), color});
-            triangles.push_back({glm::vec2(p3.x, p3.y), color});
-        }
-    }
-
+    void draw_point(pt p, glm::vec4 color);
+    void draw_line(pt a, pt b, glm::vec4 color);
+    void draw_polygon(const std::vector<pt>& poly, glm::vec4 color);
+    void draw_text(const std::string& text, pt pos, float font_size, glm::vec4 color);
     bool is_key_pressed(int key);
 private:
+    std::vector<Vertex> text_vertices;
+
     std::vector<Vertex> points;
     std::vector<Vertex> lines;
     std::vector<Vertex> triangles;
@@ -52,4 +37,5 @@ private:
 
     void init_pipelines();
     void init_render_resources();
+    void init_text_pipeline();
 };
