@@ -17,9 +17,9 @@ int main() {
     recorder.commit_step();
 
     // Higlhigting points
-    recorder.record_highlight_point(random_pt(mn,mx));
+    recorder.record_highlight(random_pt(mn,mx), 4);
     recorder.commit_step();
-    recorder.record_highlight_point(random_pt(mn,mx), ORANGE);
+    recorder.record_highlight(random_pt(mn,mx), 4, ORANGE);
     recorder.commit_step();
 
     // Rectangles

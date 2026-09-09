@@ -30,8 +30,8 @@ void AlgorithmRecorder::record_polygon(
     current_frame_commands.push_back({DRAW_POLYGON, vector<pt>(poly.begin(),poly.end()), fill_color});
 }
 
-void AlgorithmRecorder::record_highlight_point(pt p, glm::vec4 color) {
-    current_frame_commands.push_back({DRAW_HIGHLIGHT, {p}, color});
+void AlgorithmRecorder::record_highlight(pt p, ld base_radius, glm::vec4 color) {
+    current_frame_commands.push_back({DRAW_HIGHLIGHT, {p}, color, TRANSPARENT, base_radius});
 }
 
 void AlgorithmRecorder::record_circle(pt center, float radius, glm::vec4 fill_color, glm::vec4 border_color) {
@@ -52,70 +52,58 @@ void AlgorithmRecorder::record_log(string log_msg) {
     current_frame_commands.push_back({LOG, {}, TRANSPARENT, TRANSPARENT, 0, log_msg});
 }
 
-vector<pt> AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>>> &adj, bool directed, GraphLayoutType layout_type) {
-    int n = sz(adj);
-    if (n == 0) return {};
 
-    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
-    vector<pt> pos = compute_layout(n, adj, layout_type);
+// Graph drawing (for both general graphs and trees)
+
+void AlgorithmRecorder::record_weighted_graph(const vector<vector<pair<int, int>>> &adj, const vector<pt>& layout, const ld node_radius, bool directed, bool bezier) {
+    int n = sz(adj);
 
     for (int u = 0; u < n; u++) {
-        for (auto& [v,w] : adj[u]) {
-            bool bezier = layout_type == GraphLayoutType::FORCE_DIRECTED;
-            pt mid = draw_edge(pos, u, v, node_radius, directed, bezier);
+        for (auto [v,w] : adj[u]) {
+            pt mid = draw_edge(layout, u, v, node_radius, directed, bezier);
             mid.x -= to_string(w).size()*(node_radius/4.0);
             mid.y -= node_radius/4;
-            record_text(to_string(w), mid, 0.7*node_radius, BLACK);
+            record_text(to_string(w), mid, 0.5*node_radius, BLACK);
         }
     }
 
     for (int i = 0; i < n; i++) {
-        record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        pt mid = pos[i];
-        mid.x -= to_string(i).size()*(node_radius/4.0);
-        mid.y -= node_radius/4;
-        record_text(to_string(i), mid, node_radius, BLACK);
+        draw_graph_node(layout[i], node_radius, to_string(i));
     }
-
-    return pos;
 }
 
-vector<pt> AlgorithmRecorder::record_unweighted_graph(const vector<vector<int>> &adj, bool directed, GraphLayoutType layout_type) {
+void AlgorithmRecorder::record_unweighted_graph(const vector<vector<int>> &adj, const vector<pt>& layout, const ld node_radius, bool directed, bool bezier) {
     int n = sz(adj);
-    if (n == 0) return {};
-    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
-    
-    vector<vector<pair<int, int>>> weighted_adj(n);
-    for (int u = 0; u < n; u++) {
-        for (int v : adj[u]) {
-            weighted_adj[u].push_back({v, 1});
-        }
-    }
-    
-    vector<pt> pos = compute_layout(n, weighted_adj, layout_type);
 
     for (int u = 0; u < n; u++) {
         for (int v : adj[u]) {
-            bool bezier = layout_type == GraphLayoutType::FORCE_DIRECTED;
-            draw_edge(pos, u, v, node_radius, directed, bezier);
+            draw_edge(layout, u, v, node_radius, directed, bezier);
         }
     }
 
     for (int i = 0; i < n; i++) {
-        record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        pt mid = pos[i];
-        mid.x -= to_string(i).size()*(node_radius/4.0);
-        mid.y -= node_radius/4;
-        record_text(to_string(i), mid, node_radius, BLACK);
+        draw_graph_node(layout[i], node_radius, to_string(i));
     }
-    return pos;
 }
 
-vector<pt> AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int root) {
+// Tree layout
+
+pair<ld, vector<pt>> AlgorithmRecorder::compute_tree_layout(const vector<vector<pair<int,int>>> &adj, int root){
+    int n = sz(adj);
+    vector<vector<int>> adj2(n);
+    for (int u = 0; u < n; u++){
+        for (auto [v,w] : adj[u]) {
+            adj2[u].push_back(v);
+        }
+    }
+    return compute_tree_layout(adj2,root);
+}
+
+pair<ld, vector<pt>> AlgorithmRecorder::compute_tree_layout(const vector<vector<int>> &adj, int root){
     int n = sz(adj);
     if (n == 0) return {};
 
-    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
+    const ld node_radius = min((grid_maxx-grid_minx)/(4*n), (grid_maxy-grid_miny)/(4*n));
 
     vector<pt> pos(n);
     vector<int> dep(n), subtree_width(n);
@@ -142,217 +130,26 @@ vector<pt> AlgorithmRecorder::record_tree(const vector<vector<int>> &adj, int ro
     };
     assign_pos(assign_pos, root, -1, 0.8*grid_minx, 0.8*grid_maxx);
 
-    auto draw_edges = [&](auto& self, int u, int p) -> void {
-        for (int v : adj[u]) if (v != p) {
-            ld ang = atan2(pos[v].y-pos[u].y, pos[v].x-pos[u].x);
-            pt start = pos[u];
-            start.x += node_radius*cos(ang);
-            start.y += node_radius*sin(ang);
-
-            pt end = pos[v];
-            end.x -= node_radius*cos(ang);
-            end.y -= node_radius*sin(ang);
-            record_line(start, end, BLACK);
-            self(self, v, u);
-        }
-    };
-
-    draw_edges(draw_edges, root, -1);
-
-    for (int i = 0; i < n; i++) {
-        record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        pt mid = pos[i];
-        mid.x -= to_string(i).size()*(node_radius/4.0);
-        mid.y -= node_radius/4;
-        record_text(to_string(i), mid, node_radius, BLACK);
-    }
-    return pos;
+    return {node_radius, pos};
 }
 
-vector<pt> AlgorithmRecorder::record_weighted_tree(const vector<vector<pair<int,int>>> &adj, int root){
+
+// Graph layout
+
+pair<ld, vector<pt>> AlgorithmRecorder::compute_graph_layout(const vector<vector<pair<int,int>>>& adj, GraphLayoutType layout_type) {
     int n = sz(adj);
-    if (n == 0) return {};
-
-    const ld node_radius = min((grid_maxx-grid_minx)/(3*n), (grid_maxy-grid_miny)/(3*n));
-
-    vector<pt> pos(n);
-    vector<int> dep(n), subtree_width(n);
-
-    auto get_tree_width = [&](auto&& self, int u, int p) -> int {
-        int width = 0;
-        for (auto [v,w] : adj[u]) if (v != p) {
-            dep[v] = dep[u] + 1;
-            width += self(self, v, u);
+    vector<vector<int>> adj2(n);
+    for (int u = 0; u < n; u++){
+        for (auto [v,w] : adj[u]) {
+            adj2[u].push_back(v);
         }
-        return subtree_width[u] = max(1, width);
-    };
-    get_tree_width(get_tree_width, root, -1);
-
-    auto assign_pos = [&](auto& self, int u, int p, float minx, float maxx) -> void {
-        pos[u].x = (minx + maxx)/2;
-        pos[u].y = grid_maxy - 2*node_radius - 3*node_radius*dep[u];
-        float x = minx;
-        for (auto [v,w] : adj[u]) if (v != p) {
-            float slice = (maxx - minx) * ((ld)subtree_width[v] / subtree_width[u]);
-            self(self, v, u, x, x + slice);
-            x += slice;
-        }
-    };
-    assign_pos(assign_pos, root, -1, 0.8*grid_minx, 0.8*grid_maxx);
-
-    auto draw_edges = [&](auto& self, int u, int p) -> void {
-        for (auto [v,w] : adj[u]) if (v != p) {
-            ld ang = atan2(pos[v].y-pos[u].y, pos[v].x-pos[u].x);
-            pt start = pos[u];
-            start.x += node_radius*cos(ang);
-            start.y += node_radius*sin(ang);
-
-            pt end = pos[v];
-            end.x -= node_radius*cos(ang);
-            end.y -= node_radius*sin(ang);
-            record_line(start, end, BLACK);
-
-            pt mid = (start+end)/2.0;
-            mid.x -= to_string(w).size()*(node_radius/4.0);
-            mid.y -= node_radius/4;
-            record_text(to_string(w), mid, 0.7*node_radius, BLACK);
-
-            self(self, v, u);
-        }
-    };
-
-    draw_edges(draw_edges, root, -1);
-
-    for (int i = 0; i < n; i++) {
-        record_circle(pos[i], node_radius, {0.8f, 0.9f, 1.0f, 1.0f}, BLACK);
-        pt mid = pos[i];
-        mid.x -= to_string(i).size()*(node_radius/4.0);
-        mid.y -= node_radius/4;
-        record_text(to_string(i), mid, node_radius, BLACK);
     }
-    return pos;
+    return compute_graph_layout(adj2,layout_type);
 }
 
-void AlgorithmRecorder::commit_step() {
-    timeline.push_back({current_frame_commands});
-    current_frame_commands.clear();
-}
-
-void AlgorithmRecorder::clear() {
-    timeline.clear();
-    current_frame_commands.clear();
-    current_frame = 0;
-}
-
-void AlgorithmRecorder::run(int frametime_ms) {
-    bool space_prev = false;
-    bool enter_prev = false;
-    bool autoplay = false;
-    double last_time = glfwGetTime();
-
-    while (vis.is_running()) {
-        vis.clear_buffers();
-        // draw_axis();
-        // draw_grid();
-
-        bool space = vis.is_key_pressed(GLFW_KEY_SPACE);
-        bool enter = vis.is_key_pressed(GLFW_KEY_ENTER);
-
-        if (!autoplay && space && !space_prev) {
-            if (!timeline.empty()) {
-                // TODO: debug multiple outputs, why is that happening
-                current_frame = (current_frame + 1) % timeline.size();
-                autoplay = false;
-                cout << "[Passo Manual] Frame " << current_frame + 1 
-                        << " / " << timeline.size() << endl;
-            }
-        }
-        space_prev = space;
-
-        if (enter && !enter_prev) {
-            autoplay = !autoplay;
-            cout << (autoplay ? "[Play] Rodando automaticamente..." : "[Pause]") << endl;
-        }
-        enter_prev = enter;
-
-        if (autoplay && !timeline.empty()) {
-            double cur_time = glfwGetTime();
-            if (cur_time - last_time > frametime_ms/1000.0) {
-                current_frame = (current_frame + 1) % timeline.size();
-                last_time = cur_time;
-            }
-        } else {
-            last_time = glfwGetTime();
-        }
-
-        if (!timeline.empty()) {
-            for (const auto& cmd : timeline[current_frame].commands) {
-                if (cmd.type == DRAW_POINT) {
-                    vis.draw_point(cmd.points[0], cmd.color);
-                } else if (cmd.type == DRAW_LINE) {
-                    vis.draw_line(cmd.points[0], cmd.points[1], cmd.color);
-                } else if (cmd.type == DRAW_POLYGON) {
-                    vis.draw_polygon(cmd.points, cmd.color);
-                } else if (cmd.type == DRAW_HIGHLIGHT) {
-                    ld pulse = (sin(8*glfwGetTime()) + 1)*0.5;
-                    ld r = 4.0 + (pulse * 3.0);
-                    vector<pt> circle = get_circle_polygon(cmd.points[0], r);
-                    for (int i = 0; i < (int)circle.size(); i++){
-                        pt p1 = circle[i];
-                        pt p2 = circle[(i+1)%circle.size()];
-                        vis.draw_line(p1, p2, RED);
-                    }
-                } else if (cmd.type == DRAW_CIRCLE) {
-                    vector<pt> circle = get_circle_polygon(cmd.points[0], cmd.radius);
-                    vis.draw_polygon(circle, cmd.color);
-                    for (int i = 0; i < (int)circle.size(); i++){
-                        pt p1 = circle[i];
-                        pt p2 = circle[(i+1)%circle.size()];
-                        vis.draw_line(p1, p2, cmd.secondary_color);
-                    }
-                } else if (cmd.type == DRAW_RECTANGLE) {
-                    pt bl = cmd.points[0];
-                    pt tr = cmd.points[1];
-                    vector<pt> rect = { bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y) };
-                    vis.draw_polygon(rect, cmd.color);
-                    for (int s = 0; s < 4; s++) {
-                        vis.draw_line(rect[s], rect[(s + 1) % 4], cmd.secondary_color);
-                    }
-                } else if (cmd.type == DRAW_TEXT) {
-                    vis.draw_text(cmd.text, cmd.points[0], cmd.radius, cmd.color);
-                } else if (cmd.type == LOG) {
-                    cout << "[LOG]: " << cmd.text << endl;
-                }
-            }
-        }
-
-        vis.render_frame(proj);
-    }
-}
-
-void AlgorithmRecorder::draw_grid(float step) {
-    glm::vec4 grid_color = {0.20f, 0.20f, 0.20f, 0.4f};
-    for (float x = grid_minx; x <= grid_maxx; x += step) {
-        if (x == 0.0f) continue;
-        vis.draw_line(pt(x, grid_miny), pt(x, grid_maxy), grid_color);
-    }
-    for (float y = grid_miny; y <= grid_maxy; y += step) {
-        if (y == 0.0f) continue;
-        vis.draw_line(pt(grid_minx, y), pt(grid_maxx, y), grid_color);
-    }
-}
-
-void AlgorithmRecorder::draw_axis(){
-    float half = 0.4f;
-    for (float offset = -half; offset <= half; offset += 0.1f) {
-        vis.draw_line(pt(grid_minx, offset), pt(grid_maxx, offset), RED);
-    }
-    for (float offset = -half; offset <= half; offset += 0.1f) {
-        vis.draw_line(pt(offset, grid_miny), pt(offset, grid_maxy), GREEN);
-    }
-}
-
-vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int, int>>>& adj, GraphLayoutType layout_type) {
+pair<ld, vector<pt>> AlgorithmRecorder::compute_graph_layout(const vector<vector<int>>& adj, GraphLayoutType layout_type) {
+    int n = sz(adj);
+    const ld node_radius = min((grid_maxx-grid_minx)/(4*n), (grid_maxy-grid_miny)/(4*n));
     vector<pt> pos(n);
     if (layout_type == CIRCULAR) {
         float r = 0.35*(grid_maxy - grid_miny);
@@ -367,7 +164,7 @@ vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int
             color[u] = c;
             if (c == 0) set0.push_back(u);
             else set1.push_back(u);
-            for (auto& [v,w] : adj[u]) {
+            for (int v : adj[u]) {
                 if (color[v] == -1) self(self, v, 1 - c);
             }
         };
@@ -469,7 +266,7 @@ vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int
 
             // Atração por arestas
             for (int u = 0; u < n; u++) {
-                for (auto& [v,w] : adj[u]) {
+                for (int v : adj[u]) {
                     if (u >= v) continue;
                     ld dx = pos[u].x - pos[v].x;
                     ld dy = pos[u].y - pos[v].y;
@@ -490,7 +287,7 @@ vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int
                 }
             }
 
-            // Gravidade central (substitui a repulsão das paredes)
+            // Gravidade central p desgrudar da parede
             ld center_x = (grid_minx + grid_maxx) / 2.0;
             ld center_y = (grid_miny + grid_maxy) / 2.0;
 
@@ -509,7 +306,7 @@ vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int
             // Repulsão entre nós e o meio das arestas, tentando evitar colinearidade
             for (int i = 0; i < n; i++) {
                 for (int u = 0; u < n; u++) {
-                    for (auto& [v, w] : adj[u]) {
+                    for (int v : adj[u]) {
                         if (u >= v || i == u || i == v) continue;
                         
                         ld mx = (pos[u].x + pos[v].x) / 2.0f;
@@ -558,7 +355,131 @@ vector<pt> AlgorithmRecorder::compute_layout(int n, const vector<vector<pair<int
             t *= 0.999; // esfria
         }
     }
-    return pos;
+    return {node_radius, pos};
+}
+
+
+
+void AlgorithmRecorder::commit_step() {
+    timeline.push_back({current_frame_commands});
+    current_frame_commands.clear();
+}
+
+void AlgorithmRecorder::clear() {
+    timeline.clear();
+    current_frame_commands.clear();
+    current_frame = 0;
+}
+
+void AlgorithmRecorder::run(int frametime_ms) {
+    bool space_prev = false;
+    bool enter_prev = false;
+    bool autoplay = false;
+    double last_time = glfwGetTime();
+
+    while (vis.is_running()) {
+        vis.clear_buffers();
+        // draw_axis();
+        // draw_grid();
+
+        bool space = vis.is_key_pressed(GLFW_KEY_SPACE);
+        bool enter = vis.is_key_pressed(GLFW_KEY_ENTER);
+
+        if (!autoplay && space && !space_prev) {
+            if (!timeline.empty()) {
+                // TODO: debug multiple outputs, why is that happening
+                current_frame = (current_frame + 1) % timeline.size();
+                autoplay = false;
+                cout << "[Passo Manual] Frame " << current_frame + 1 
+                        << " / " << timeline.size() << endl;
+            }
+        }
+        space_prev = space;
+
+        if (enter && !enter_prev) {
+            autoplay = !autoplay;
+            cout << (autoplay ? "[Play] Rodando automaticamente..." : "[Pause]") << endl;
+        }
+        enter_prev = enter;
+
+        if (autoplay && !timeline.empty()) {
+            double cur_time = glfwGetTime();
+            if (cur_time - last_time > frametime_ms/1000.0) {
+                current_frame = (current_frame + 1) % timeline.size();
+                last_time = cur_time;
+            }
+        } else {
+            last_time = glfwGetTime();
+        }
+
+        if (!timeline.empty()) {
+            for (const auto& cmd : timeline[current_frame].commands) {
+                if (cmd.type == DRAW_POINT) {
+                    vis.draw_point(cmd.points[0], cmd.color);
+                } else if (cmd.type == DRAW_LINE) {
+                    vis.draw_line(cmd.points[0], cmd.points[1], cmd.color);
+                } else if (cmd.type == DRAW_POLYGON) {
+                    vis.draw_polygon(cmd.points, cmd.color);
+                } else if (cmd.type == DRAW_HIGHLIGHT) {
+                    ld pulse = (sin(8*glfwGetTime()) + 1)*0.5;
+                    ld r = cmd.radius + (pulse * cmd.radius * 0.5);
+                    vector<pt> circle = get_circle_polygon(cmd.points[0], r);
+                    for (int i = 0; i < (int)circle.size(); i++){
+                        pt p1 = circle[i];
+                        pt p2 = circle[(i+1)%circle.size()];
+                        vis.draw_line(p1, p2, cmd.color);
+                    }
+                } else if (cmd.type == DRAW_CIRCLE) {
+                    vector<pt> circle = get_circle_polygon(cmd.points[0], cmd.radius);
+                    vis.draw_polygon(circle, cmd.color);
+                    for (int i = 0; i < (int)circle.size(); i++){
+                        pt p1 = circle[i];
+                        pt p2 = circle[(i+1)%circle.size()];
+                        vis.draw_line(p1, p2, cmd.secondary_color);
+                    }
+                } else if (cmd.type == DRAW_RECTANGLE) {
+                    pt bl = cmd.points[0];
+                    pt tr = cmd.points[1];
+                    vector<pt> rect = { bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y) };
+                    vis.draw_polygon(rect, cmd.color);
+                    for (int s = 0; s < 4; s++) {
+                        vis.draw_line(rect[s], rect[(s + 1) % 4], cmd.secondary_color);
+                    }
+                } else if (cmd.type == DRAW_TEXT) {
+                    vis.draw_text(cmd.text, cmd.points[0], cmd.radius, cmd.color);
+                } else if (cmd.type == LOG) {
+                    cout << "[LOG]: " << cmd.text << endl;
+                }
+            }
+        }
+
+        vis.render_frame(proj);
+    }
+}
+
+
+// Helper methods
+
+void AlgorithmRecorder::draw_grid(float step) {
+    glm::vec4 grid_color = {0.20f, 0.20f, 0.20f, 0.4f};
+    for (float x = grid_minx; x <= grid_maxx; x += step) {
+        if (x == 0.0f) continue;
+        vis.draw_line(pt(x, grid_miny), pt(x, grid_maxy), grid_color);
+    }
+    for (float y = grid_miny; y <= grid_maxy; y += step) {
+        if (y == 0.0f) continue;
+        vis.draw_line(pt(grid_minx, y), pt(grid_maxx, y), grid_color);
+    }
+}
+
+void AlgorithmRecorder::draw_axis(){
+    float half = 0.4f;
+    for (float offset = -half; offset <= half; offset += 0.1f) {
+        vis.draw_line(pt(grid_minx, offset), pt(grid_maxx, offset), RED);
+    }
+    for (float offset = -half; offset <= half; offset += 0.1f) {
+        vis.draw_line(pt(offset, grid_miny), pt(offset, grid_maxy), GREEN);
+    }
 }
 
 void AlgorithmRecorder::draw_arrow_head(pt from, pt to, ld node_radius) {
@@ -637,4 +558,12 @@ pt AlgorithmRecorder::draw_edge(const vector<pt> &pos, int u, int v, const ld no
     if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius);
     
     return f(0.5); // mid point to draw weight
+}
+
+void AlgorithmRecorder::draw_graph_node(pt pos, ld radius, string label, glm::vec4 color) {
+    record_circle(pos, radius, color, BLACK);
+    pt mid = pos;
+    mid.x -= label.size()*(radius/4.0);
+    mid.y -= radius/4;
+    record_text(label, mid, radius, BLACK);
 }
