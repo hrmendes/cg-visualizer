@@ -59,6 +59,7 @@ int main() {
                 pq.push({dist[v], v});
                 
                 draw_base();
+                recorder.record_highlight(pos[u], node_radius, RED);
                 recorder.record_highlight(pos[v], node_radius, GREEN);
                 recorder.commit_step();
             }
