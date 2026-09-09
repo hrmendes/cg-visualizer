@@ -12,10 +12,6 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../utils/stb_truetype.h"
 
-// Mantemos apenas o array de caracteres em CPU estático
-static stbtt_bakedchar s_cdata[96];
-
-// Estrutura interna sem duplicatas
 struct VulkanState {
     GLFWwindow* window;
     VkInstance instance;
@@ -37,7 +33,6 @@ struct VulkanState {
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
     
-    // Sincronização
     VkSemaphore imageAvailableSemaphore;
     VkSemaphore renderFinishedSemaphore;
     VkFence inFlightFence;
@@ -45,7 +40,7 @@ struct VulkanState {
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
 
-    // Recursos exclusivos para Texto
+    // Recursos de Texto e UTF-8
     VkImage fontImage;
     VkDeviceMemory fontMemory;
     VkImageView fontImageView;
@@ -55,6 +50,19 @@ struct VulkanState {
     VkDescriptorSetLayout textDescriptorSetLayout;
     VkDescriptorPool textDescriptorPool;
     VkDescriptorSet textDescriptorSet;
+
+    // Buffers Persistentes para atualização do Atlas na GPU
+    VkBuffer fontStagingBuffer;
+    VkDeviceMemory fontStagingMemory;
+    void* fontStagingMapped;
+    bool fontAtlasDirty;
+
+    stbtt_fontinfo fontInfo;
+    std::vector<unsigned char> fontBufferStorage;
+    std::vector<unsigned char> atlasBitmap;
+    stbtt_pack_context spc;
+    stbtt_packedchar packedChars[65536];
+    bool charBaked[65536];
 };
 
 bool Visualizer::is_key_pressed(int key){
@@ -136,7 +144,6 @@ void Visualizer::init_render_resources() {
     vkCreatePipelineLayout(vkState->device, &pipelineLayoutInfo, nullptr, &vkState->pipelineLayout);
 }
 
-// create_pipeline atualizado para receber caminhos e layout específicos
 VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState, const std::string& vertPath, const std::string& fragPath, VkPipelineLayout layout) {
     auto vertShaderCode = read_file(vertPath);
     auto fragShaderCode = read_file(fragPath);
@@ -163,7 +170,6 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState, c
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    // Atualizado para 3 atributos (Posição, UV e Cor)
     std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
@@ -243,7 +249,7 @@ VkPipeline create_pipeline(VkPrimitiveTopology topology, VulkanState *vkState, c
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = layout; // Usa o layout parametrizado
+    pipelineInfo.layout = layout;
     pipelineInfo.renderPass = vkState->renderPass;
     pipelineInfo.subpass = 0;
 
@@ -269,9 +275,11 @@ void Visualizer::init_pipelines() {
 }
 
 void Visualizer::init_text_pipeline() {
-    int bitmap_w = 512;
-    int bitmap_h = 512;
-    std::vector<unsigned char> bitmap(bitmap_w * bitmap_h);
+    int bitmap_w = 1024;
+    int bitmap_h = 1024;
+    vkState->atlasBitmap.resize(bitmap_w * bitmap_h, 0);
+    std::memset(vkState->charBaked, 0, sizeof(vkState->charBaked));
+    vkState->fontAtlasDirty = false;
 
     std::string font_path = "assets/fonts/JetBrainsMono.ttf";
     std::ifstream file(font_path, std::ios::binary | std::ios::ate);
@@ -281,10 +289,28 @@ void Visualizer::init_text_pipeline() {
     }
     std::streamsize file_size = file.tellg();
     file.seekg(0, std::ios::beg);
-    std::vector<char> font_buffer(file_size);
-    file.read(font_buffer.data(), file_size);
+    vkState->fontBufferStorage.resize(file_size);
+    file.read((char*)vkState->fontBufferStorage.data(), file_size);
 
-    stbtt_BakeFontBitmap((unsigned char*)font_buffer.data(), 0, 32.0f, bitmap.data(), bitmap_w, bitmap_h, 32, 96, s_cdata);
+    // Inicializa o packer
+    if (!stbtt_PackBegin(&vkState->spc, vkState->atlasBitmap.data(), bitmap_w, bitmap_h, 0, 1, nullptr)) {
+        std::cerr << "ERRO: Falha ao iniciar stbtt_PackBegin" << std::endl;
+        return;
+    }
+    stbtt_PackSetOversampling(&vkState->spc, 2, 2);
+
+    // Pré-carrega ASCII
+    stbtt_pack_range range;
+    range.font_size = 32.0f;
+    range.first_unicode_codepoint_in_range = 32;
+    range.array_of_unicode_codepoints = nullptr;
+    range.num_chars = 95;
+    range.chardata_for_range = &vkState->packedChars[32];
+    stbtt_PackFontRanges(&vkState->spc, vkState->fontBufferStorage.data(), 0, &range, 1);
+    
+    for (int i = 32; i < 127; i++) {
+        vkState->charBaked[i] = true;
+    }
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -300,7 +326,6 @@ void Visualizer::init_text_pipeline() {
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
     vkCreateImage(vkState->device, &imageInfo, nullptr, &vkState->fontImage);
 
     VkMemoryRequirements memRequirements;
@@ -318,20 +343,18 @@ void Visualizer::init_text_pipeline() {
             break;
         }
     }
-
     vkAllocateMemory(vkState->device, &allocInfo, nullptr, &vkState->fontMemory);
     vkBindImageMemory(vkState->device, vkState->fontImage, vkState->fontMemory, 0);
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
+    // Staging buffer PERSISTENTE para atualizações dinâmicas da textura
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = bitmap_w * bitmap_h;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vkCreateBuffer(vkState->device, &bufferInfo, nullptr, &stagingBuffer);
+    vkCreateBuffer(vkState->device, &bufferInfo, nullptr, &vkState->fontStagingBuffer);
 
-    vkGetBufferMemoryRequirements(vkState->device, stagingBuffer, &memRequirements);
+    vkGetBufferMemoryRequirements(vkState->device, vkState->fontStagingBuffer, &memRequirements);
     allocInfo.allocationSize = memRequirements.size;
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
         if ((memRequirements.memoryTypeBits & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))) {
@@ -339,15 +362,14 @@ void Visualizer::init_text_pipeline() {
             break;
         }
     }
-    vkAllocateMemory(vkState->device, &allocInfo, nullptr, &stagingBufferMemory);
-    vkBindBufferMemory(vkState->device, stagingBuffer, stagingBufferMemory, 0);
+    vkAllocateMemory(vkState->device, &allocInfo, nullptr, &vkState->fontStagingMemory);
+    vkBindBufferMemory(vkState->device, vkState->fontStagingBuffer, vkState->fontStagingMemory, 0);
+    
+    // Mapeia permanentemente para evitar overhead de mapeamento em tempo real
+    vkMapMemory(vkState->device, vkState->fontStagingMemory, 0, VK_WHOLE_SIZE, 0, &vkState->fontStagingMapped);
+    memcpy(vkState->fontStagingMapped, vkState->atlasBitmap.data(), bitmap_w * bitmap_h);
 
-    void* data;
-    vkMapMemory(vkState->device, stagingBufferMemory, 0, bufferInfo.size, 0, &data);
-    memcpy(data, bitmap.data(), (size_t)bufferInfo.size);
-    vkUnmapMemory(vkState->device, stagingBufferMemory);
-
-    // --- INÍCIO DA CÓPIA E TRANSIÇÃO DE LAYOUT ---
+    // Carga inicial
     VkCommandBufferAllocateInfo allocInfoCmd{};
     allocInfoCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfoCmd.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -362,7 +384,6 @@ void Visualizer::init_text_pipeline() {
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(tempCmdBuffer, &beginInfo);
 
-    // 1. Transição: UNDEFINED -> TRANSFER_DST_OPTIMAL
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -378,37 +399,22 @@ void Visualizer::init_text_pipeline() {
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-    vkCmdPipelineBarrier(tempCmdBuffer, 
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(tempCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // 2. Copiar Staging Buffer para a VkImage
     VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
     region.imageExtent = { (uint32_t)bitmap_w, (uint32_t)bitmap_h, 1 };
+    vkCmdCopyBufferToImage(tempCmdBuffer, vkState->fontStagingBuffer, vkState->fontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    vkCmdCopyBufferToImage(tempCmdBuffer, stagingBuffer, vkState->fontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    // 3. Transição: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(tempCmdBuffer, 
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 
-        0, 0, nullptr, 0, nullptr, 1, &barrier);
-
+    vkCmdPipelineBarrier(tempCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     vkEndCommandBuffer(tempCmdBuffer);
 
-    // Submeter e aguardar a GPU terminar
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
@@ -416,12 +422,7 @@ void Visualizer::init_text_pipeline() {
 
     vkQueueSubmit(vkState->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(vkState->graphicsQueue);
-
     vkFreeCommandBuffers(vkState->device, vkState->commandPool, 1, &tempCmdBuffer);
-    // --- FIM DA CÓPIA E TRANSIÇÃO ---
-
-    vkDestroyBuffer(vkState->device, stagingBuffer, nullptr);
-    vkFreeMemory(vkState->device, stagingBufferMemory, nullptr);
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -460,7 +461,7 @@ void Visualizer::init_text_pipeline() {
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.maxSets = 1; // Corrigido erro de validação
+    poolInfo.maxSets = 1;
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
     vkCreateDescriptorPool(vkState->device, &poolInfo, nullptr, &vkState->textDescriptorPool);
@@ -498,20 +499,11 @@ void Visualizer::init_text_pipeline() {
     pushConstantRange.size = sizeof(glm::mat4);
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-
     vkCreatePipelineLayout(vkState->device, &pipelineLayoutInfo, nullptr, &vkState->textPipelineLayout);
 
-    // Pipeline exclusivo de texto usa text_frag.spv
     std::string vert = "src/vulkan_renderer/shaders/vert.spv";
     std::string text_frag = "src/vulkan_renderer/shaders/text_frag.spv";
-
-    vkState->graphicsPipelineText = create_pipeline(
-        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 
-        vkState, 
-        vert, 
-        text_frag, 
-        vkState->textPipelineLayout
-    );
+    vkState->graphicsPipelineText = create_pipeline(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, vkState, vert, text_frag, vkState->textPipelineLayout);
 }
 
 void Visualizer::init(int width, int height) {
@@ -622,10 +614,19 @@ void Visualizer::init(int width, int height) {
 void Visualizer::cleanup() {
     if (!vkState) return;
 
+    // Resolve o memory leak principal da árvore do packer
+    stbtt_PackEnd(&vkState->spc);
+
     if (vkState->device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(vkState->device);
 
-        // Limpeza dos recursos de Texto (resolve o Memory Leak)
+        // Desaloca staging buffer do font atlas
+        if (vkState->fontStagingBuffer != VK_NULL_HANDLE) {
+            vkUnmapMemory(vkState->device, vkState->fontStagingMemory);
+            vkDestroyBuffer(vkState->device, vkState->fontStagingBuffer, nullptr);
+            vkFreeMemory(vkState->device, vkState->fontStagingMemory, nullptr);
+        }
+
         if (vkState->graphicsPipelineText != VK_NULL_HANDLE) vkDestroyPipeline(vkState->device, vkState->graphicsPipelineText, nullptr);
         if (vkState->textPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(vkState->device, vkState->textPipelineLayout, nullptr);
         if (vkState->textDescriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(vkState->device, vkState->textDescriptorSetLayout, nullptr);
@@ -637,68 +638,35 @@ void Visualizer::cleanup() {
         if (vkState->fontMemory != VK_NULL_HANDLE) vkFreeMemory(vkState->device, vkState->fontMemory, nullptr);
     }
 
-    // 1. Framebuffers
     for (auto framebuffer : vkState->swapChainFramebuffers) {
-        if (framebuffer != VK_NULL_HANDLE) {
-            vkDestroyFramebuffer(vkState->device, framebuffer, nullptr);
-        }
+        if (framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(vkState->device, framebuffer, nullptr);
     }
     vkState->swapChainFramebuffers.clear();
 
-    // 2. Pipelines básicos
-    if (vkState->graphicsPipelineTriangles != VK_NULL_HANDLE) {
-        vkDestroyPipeline(vkState->device, vkState->graphicsPipelineTriangles, nullptr);
-    }
-    if (vkState->graphicsPipelineLines != VK_NULL_HANDLE) {
-        vkDestroyPipeline(vkState->device, vkState->graphicsPipelineLines, nullptr);
-    }
-    if (vkState->graphicsPipelinePoints != VK_NULL_HANDLE) {
-        vkDestroyPipeline(vkState->device, vkState->graphicsPipelinePoints, nullptr);
-    }
+    if (vkState->graphicsPipelineTriangles != VK_NULL_HANDLE) vkDestroyPipeline(vkState->device, vkState->graphicsPipelineTriangles, nullptr);
+    if (vkState->graphicsPipelineLines != VK_NULL_HANDLE) vkDestroyPipeline(vkState->device, vkState->graphicsPipelineLines, nullptr);
+    if (vkState->graphicsPipelinePoints != VK_NULL_HANDLE) vkDestroyPipeline(vkState->device, vkState->graphicsPipelinePoints, nullptr);
+    if (vkState->pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(vkState->device, vkState->pipelineLayout, nullptr);
+    if (vkState->renderPass != VK_NULL_HANDLE) vkDestroyRenderPass(vkState->device, vkState->renderPass, nullptr);
 
-    if (vkState->pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(vkState->device, vkState->pipelineLayout, nullptr);
-    }
-
-    if (vkState->renderPass != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(vkState->device, vkState->renderPass, nullptr);
+    if (vkState && vkState->device != VK_NULL_HANDLE) {
+        if (vkState->vertexBuffer != VK_NULL_HANDLE) vkDestroyBuffer(vkState->device, vkState->vertexBuffer, nullptr);
+        if (vkState->vertexBufferMemory != VK_NULL_HANDLE) vkFreeMemory(vkState->device, vkState->vertexBufferMemory, nullptr);
     }
 
     if (vkState && vkState->device != VK_NULL_HANDLE) {
-        if (vkState->vertexBuffer != VK_NULL_HANDLE) {
-            vkDestroyBuffer(vkState->device, vkState->vertexBuffer, nullptr);
-        }
-        if (vkState->vertexBufferMemory != VK_NULL_HANDLE) {
-            vkFreeMemory(vkState->device, vkState->vertexBufferMemory, nullptr);
-        }
-    }
-
-    if (vkState && vkState->device != VK_NULL_HANDLE) {
-        if (vkState->imageAvailableSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(vkState->device, vkState->imageAvailableSemaphore, nullptr);
-        }
-        if (vkState->renderFinishedSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(vkState->device, vkState->renderFinishedSemaphore, nullptr);
-        }
-        if (vkState->inFlightFence != VK_NULL_HANDLE) {
-            vkDestroyFence(vkState->device, vkState->inFlightFence, nullptr);
-        }
-        if (vkState->commandPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(vkState->device, vkState->commandPool, nullptr);
-        }
+        if (vkState->imageAvailableSemaphore != VK_NULL_HANDLE) vkDestroySemaphore(vkState->device, vkState->imageAvailableSemaphore, nullptr);
+        if (vkState->renderFinishedSemaphore != VK_NULL_HANDLE) vkDestroySemaphore(vkState->device, vkState->renderFinishedSemaphore, nullptr);
+        if (vkState->inFlightFence != VK_NULL_HANDLE) vkDestroyFence(vkState->device, vkState->inFlightFence, nullptr);
+        if (vkState->commandPool != VK_NULL_HANDLE) vkDestroyCommandPool(vkState->device, vkState->commandPool, nullptr);
     }
 
     if (vkState && vkState->device != VK_NULL_HANDLE) {
         for (auto imageView : vkState->swapChainImageViews) {
-            if (imageView != VK_NULL_HANDLE) {
-                vkDestroyImageView(vkState->device, imageView, nullptr);
-            }
+            if (imageView != VK_NULL_HANDLE) vkDestroyImageView(vkState->device, imageView, nullptr);
         }
         vkState->swapChainImageViews.clear();
-
-        if (vkState->swapChain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(vkState->device, vkState->swapChain, nullptr);
-        }
+        if (vkState->swapChain != VK_NULL_HANDLE) vkDestroySwapchainKHR(vkState->device, vkState->swapChain, nullptr);
     }
 
     if (vkState && vkState->device != VK_NULL_HANDLE) {
@@ -708,20 +676,12 @@ void Visualizer::cleanup() {
 
     if (vkState->instance != VK_NULL_HANDLE) {
         auto destroyFn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(vkState->instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (destroyFn && vkState->debug_messenger != VK_NULL_HANDLE) {
-            destroyFn(vkState->instance, vkState->debug_messenger, nullptr);
-        }
-
-        if (vkState->surface != VK_NULL_HANDLE) {
-            vkDestroySurfaceKHR(vkState->instance, vkState->surface, nullptr);
-        }
-
+        if (destroyFn && vkState->debug_messenger != VK_NULL_HANDLE) destroyFn(vkState->instance, vkState->debug_messenger, nullptr);
+        if (vkState->surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(vkState->instance, vkState->surface, nullptr);
         vkDestroyInstance(vkState->instance, nullptr);
     }
 
-    if (vkState->window != nullptr) {
-        glfwDestroyWindow(vkState->window);
-    }
+    if (vkState->window != nullptr) glfwDestroyWindow(vkState->window);
     glfwTerminate();
 
     delete vkState;
@@ -747,7 +707,6 @@ void Visualizer::render_frame(glm::mat4 proj) {
     VkResult result = vkAcquireNextImageKHR(vkState->device, vkState->swapChain, UINT64_MAX, vkState->imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        std::cout << "ALERTA: Janela desatualizada (Wayland/Resize). Frame pulado." << std::endl;
         return; 
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         std::cout << "ERRO: vkAcquireNextImageKHR falhou." << std::endl;
@@ -781,6 +740,42 @@ void Visualizer::render_frame(glm::mat4 proj) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(vkState->commandBuffer, &beginInfo);
+
+    // --- SICRONIZAÇÃO DINÂMICA CPU -> GPU PARA CARACTERES UTF-8 ---
+    if (vkState->fontAtlasDirty) {
+        memcpy(vkState->fontStagingMapped, vkState->atlasBitmap.data(), 1024 * 1024);
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = vkState->fontImage;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(vkState->commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = { 1024, 1024, 1 };
+        vkCmdCopyBufferToImage(vkState->commandBuffer, vkState->fontStagingBuffer, vkState->fontImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(vkState->commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        vkState->fontAtlasDirty = false;
+    }
 
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -833,7 +828,6 @@ void Visualizer::render_frame(glm::mat4 proj) {
     if (!text_vertices.empty()) {
         vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipelineText);
         vkCmdBindDescriptorSets(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->textPipelineLayout, 0, 1, &vkState->textDescriptorSet, 0, nullptr);
-        
         vkCmdDraw(vkState->commandBuffer, static_cast<uint32_t>(text_vertices.size()), 1, static_cast<uint32_t>(text_offset), 0);
     }
 
@@ -896,23 +890,66 @@ void Visualizer::draw_text(const std::string& text, pt pos, float font_size, glm
     float cursor_x = 0.0f;
     float cursor_y = 0.0f;
 
-    for (unsigned char ch : text) {
-        if (ch >= 32 && ch < 128) {
-            stbtt_aligned_quad q;
-            stbtt_GetBakedQuad(s_cdata, 512, 512, ch - 32, &cursor_x, &cursor_y, &q, 1);
+    size_t i = 0;
+    while (i < text.length()) {
+        unsigned int codepoint = 0;
+        unsigned char c = text[i];
+        int bytes_to_read = 0;
 
-            float x0 = pos.x + q.x0 * scale;
-            float y0 = pos.y - q.y0 * scale;
-            float x1 = pos.x + q.x1 * scale;
-            float y1 = pos.y - q.y1 * scale;
-
-            text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
-            text_vertices.push_back({{x0, y1}, color, {q.s0, q.t1}});
-            text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
-
-            text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
-            text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
-            text_vertices.push_back({{x1, y0}, color, {q.s1, q.t0}});
+        if (c < 0x80) {
+            codepoint = c;
+            bytes_to_read = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            codepoint = c & 0x1F;
+            bytes_to_read = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            codepoint = c & 0x0F;
+            bytes_to_read = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            codepoint = c & 0x07;
+            bytes_to_read = 4;
+        } else {
+            i++;
+            continue;
         }
+
+        if (i + bytes_to_read > text.length()) break;
+
+        for (int b = 1; b < bytes_to_read; b++) {
+            codepoint = (codepoint << 6) | (text[i + b] & 0x3F);
+        }
+        i += bytes_to_read;
+
+        // Limite de segurança para não explodir os arrays caso passem Emojis (codepoint > 65535)
+        if (codepoint >= 65536) codepoint = '?'; 
+
+        if (!vkState->charBaked[codepoint]) {
+            stbtt_pack_range range;
+            range.font_size = 32.0f;
+            range.first_unicode_codepoint_in_range = codepoint;
+            range.array_of_unicode_codepoints = nullptr;
+            range.num_chars = 1;
+            range.chardata_for_range = &vkState->packedChars[codepoint]; 
+
+            stbtt_PackFontRanges(&vkState->spc, vkState->fontBufferStorage.data(), 0, &range, 1);
+            vkState->charBaked[codepoint] = true;
+            vkState->fontAtlasDirty = true; // Avisa a GPU para atualizar a textura antes de renderizar
+        }
+
+        stbtt_aligned_quad q;
+        stbtt_GetPackedQuad(vkState->packedChars, 1024, 1024, codepoint, &cursor_x, &cursor_y, &q, 1);
+
+        float x0 = pos.x + q.x0 * scale;
+        float y0 = pos.y - q.y0 * scale;
+        float x1 = pos.x + q.x1 * scale;
+        float y1 = pos.y - q.y1 * scale;
+
+        text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
+        text_vertices.push_back({{x0, y1}, color, {q.s0, q.t1}});
+        text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
+
+        text_vertices.push_back({{x0, y0}, color, {q.s0, q.t0}});
+        text_vertices.push_back({{x1, y1}, color, {q.s1, q.t1}});
+        text_vertices.push_back({{x1, y0}, color, {q.s1, q.t0}});
     }
 }
