@@ -21,6 +21,7 @@ int main() {
     int start = 0;
     const int inf = 1e9;
     vector<int> dist(n, inf);
+    vector<int> par(n, -1);
     priority_queue<ii, vector<ii>, greater<ii>> pq;
     dist[start] = 0;
     pq.push({dist[start], start});
@@ -32,12 +33,15 @@ int main() {
         for (int u = 0; u < n; u++){
             if (discovered[u]) {
                 recorder.draw_graph_node(pos[u], node_radius, to_string(u), SEAGREEN);
+                if (par[u] != -1){
+                    recorder.draw_edge(pos, par[u], u, node_radius, directed, bezier, SEAGREEN);
+                }
             }
             pt p = pos[u];
-            p.x += 0.7*node_radius;
+            p.x += 0.1*node_radius;
             auto c = discovered[u] ? BLUE : DARK_GREEN;
             string d = dist[u] == inf ? "∞" : to_string(dist[u]);
-            recorder.record_text("("+d+")", pos[u], 0.5*node_radius, c);
+            recorder.record_text("("+d+")", p, 0.5*node_radius, c);
         }
     };
     draw_base(); 
@@ -55,16 +59,21 @@ int main() {
 
         for (auto [v, w] : adj[u]) {
             if (dist[v] > dist[u] + w) {
+                par[v] = u;
                 dist[v] = dist[u] + w;
                 pq.push({dist[v], v});
                 
                 draw_base();
                 recorder.record_highlight(pos[u], node_radius, RED);
-                recorder.record_highlight(pos[v], node_radius, GREEN);
+                recorder.draw_edge(pos, u, v, node_radius, directed, bezier, BLUE);
+                recorder.record_circle(pos[v], node_radius, TRANSPARENT, BLUE);
                 recorder.commit_step();
             }
         }
     }
+
+    draw_base(); 
+    recorder.commit_step();
 
     recorder.run(500);
     return 0;

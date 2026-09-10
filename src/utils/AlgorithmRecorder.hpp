@@ -342,7 +342,6 @@ public:
             }
         };
 
-
         auto compute_force_directed_layout = [&]() -> void {
             float area = width * height;
             
@@ -485,8 +484,6 @@ public:
         return {node_radius, pos};
     }
 
-
-
     void commit_step() {
         timeline.push_back({current_frame_commands});
         current_frame_commands.clear();
@@ -575,7 +572,6 @@ public:
             minus_prev = minus;
         };
 
-        
         auto update_playback = [&]() -> void {
             if (autoplay && !timeline.empty()) {
                 double cur_time = glfwGetTime();
@@ -700,7 +696,6 @@ public:
             vis.draw_text(commands, pt(x + 30.0f, y + 4.0f), 2.5f, text_color);
         };
 
-
         while (vis.is_running()) {
             handle_input();
             update_playback();
@@ -737,17 +732,17 @@ public:
         }
     }
 
-    void draw_arrow_head(pt<float> from, pt<float> to, float node_radius) {
+    void draw_arrow_head(pt<float> from, pt<float> to, float node_radius, glm::vec4 color) {
         float angle = atan2(to.y-from.y, to.x - from.x);
         float len = node_radius/2;;
         pt tip = to;
         pt<float> left(tip.x - len*cos(angle - M_PI/10), tip.y - len * sin(angle - M_PI/10));
         pt<float> right(tip.x -len*cos(angle + M_PI/10), tip.y - len * sin(angle + M_PI/10));
         vector<pt<float>> tri = {tip, left, right};
-        record_polygon(tri, BLACK, BLACK, TRANSPARENT);
+        record_polygon(tri, color, color, TRANSPARENT);
     }
 
-    pt<float> draw_edge(const vector<pt<float>> &pos, int u, int v, const float node_radius, bool directed, bool bezier){
+    pt<float> draw_edge(const vector<pt<float>> &pos, int u, int v, const float node_radius, bool directed, bool bezier, glm::vec4 color = BLACK){
         if (!bezier){
             ld ang = atan2(pos[v].y - pos[u].y, pos[v].x - pos[u].x);
             pt start = pos[u];
@@ -757,8 +752,8 @@ public:
             end.x -= node_radius*cos(ang);
             end.y -= node_radius*sin(ang);
             
-            record_line(start, end);
-            if (directed) draw_arrow_head(start, end, node_radius);
+            record_line(start, end, color);
+            if (directed) draw_arrow_head(start, end, node_radius, color);
             return (pos[u]+pos[v])/2.0;
         }
 
@@ -809,9 +804,9 @@ public:
         }
 
         for (int i = 0; i < segments-1; i++){
-            record_line(curve[i], curve[i+1]);
+            record_line(curve[i], curve[i+1], color);
         }
-        if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius);
+        if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius, color);
         
         return f(0.5); // mid point to draw weight
     }
