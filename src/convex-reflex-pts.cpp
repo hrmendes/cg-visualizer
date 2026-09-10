@@ -5,9 +5,10 @@ using namespace std;
 #include "utils/generators/geometry.hpp"
 
 int main() {
+    cout << "How many segments?\n";
+    int n; cin >> n;
+    
     AlgorithmRecorder recorder(-100, 100, -100, 100);
-
-    int n = 15;
     auto poly = random_simple_polygon(n, -80, 80);
     recorder.record_polygon(poly);
 

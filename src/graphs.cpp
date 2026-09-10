@@ -3,7 +3,7 @@
 #include "utils/AlgorithmRecorder.hpp"
 
 int main() {
-    AlgorithmRecorder recorder(-100, 100, -100, 100, 1300, 1300);
+    AlgorithmRecorder recorder(-100, 100, -100, 100, 800, 800);
 
     {
         auto adj = random_graph(20, 25, false);

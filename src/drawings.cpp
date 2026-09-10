@@ -4,8 +4,8 @@
 #include "utils/generators/geometry.hpp"
 
 int main() {
-    int mn = -200, mx = 200;
-    AlgorithmRecorder recorder(mn,mx,mn,mx);
+    int mn = -100, mx = 100;
+    AlgorithmRecorder recorder(mn,mx,mn,mx,800,800);
 
     recorder.commit_step(); // empty start
 
