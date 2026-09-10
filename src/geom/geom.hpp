@@ -99,10 +99,21 @@ bool isinseg(pt<T> p, line<T> r) {
 template<class T>
 bool interseg(line<T> r, line<T> s) {
     if (isinseg(r.p, s) || isinseg(r.q, s) || 
-            isinseg(s.p, r) || isinseg(s.q, r)) return 1;
+        isinseg(s.p, r) || isinseg(s.q, r)) return 1;
     return ccw(r.p, r.q, s.p) != ccw(r.p, r.q, s.q) &&
-                 ccw(s.p, s.q, r.p) != ccw(s.p, s.q, r.q);
+           ccw(s.p, s.q, r.p) != ccw(s.p, s.q, r.q);
 }
+
+// make sure there is an intersection before calling it
+template<class T>
+pt<T> inter(line<T> a, line<T> b) {
+    pt<T> v = a.q - a.p;
+    pt<T> w = b.q - b.p;
+    ld t = (ld)((b.p - a.p) ^ w) / (ld)(v ^ w);
+    return a.p + v * t;
+}
+
+
 
 template<class T>
 ld disttoline(pt<T> p, line<T> r) { 

@@ -14,6 +14,11 @@ pt<T> random_pt(T min_c, T max_c) {
 }
 
 template<class T>
+line<T> random_line(T min_c, T max_c) {
+    return {random_pt(min_c, max_c), random_pt(min_c, max_c)};
+}
+
+template<class T>
 vector<pt<T>> random_simple_polygon(int n, T min_c, T max_c) {
     vector<pt<T>> pts(n);
     for (auto &p : pts) p = random_pt(min_c, max_c);
