@@ -1,5 +1,4 @@
 #include "geom/geom.hpp"
-#include "geom/basics.hpp"
 #include "utils/AlgorithmRecorder.hpp"
 #include "geom/triangulation.hpp"
 #include "utils/generators/geometry.hpp"

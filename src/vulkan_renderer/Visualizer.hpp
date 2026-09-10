@@ -21,11 +21,12 @@ public:
 
     ~Visualizer() { cleanup(); }
 
-    void draw_point(pt p, glm::vec4 color);
-    void draw_line(pt a, pt b, glm::vec4 color);
-    void draw_polygon(const std::vector<pt>& poly, glm::vec4 color);
-    void draw_text(const std::string& text, pt pos, float font_size, glm::vec4 color);
+    void draw_point(pt<float> p, glm::vec4 color);
+    void draw_line(pt<float> a, pt<float> b, glm::vec4 color);
+    void draw_polygon(const std::vector<pt<float>>& poly, glm::vec4 color);
+    void draw_text(const std::string& text, pt<float> pos, float font_size, glm::vec4 color);
     bool is_key_pressed(int key);
+    void stop() { running = false; }
 private:
     std::vector<Vertex> text_vertices;
 
@@ -38,4 +39,6 @@ private:
     void init_pipelines();
     void init_render_resources();
     void init_text_pipeline();
+
+    bool running = true;
 };

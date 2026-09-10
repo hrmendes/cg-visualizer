@@ -8,7 +8,6 @@
 #include "VkBootstrap.h"
 #include <iostream>
 
-#include "../geom/triangulation.hpp"
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../utils/stb_truetype.h"
 
@@ -507,6 +506,7 @@ void Visualizer::init_text_pipeline() {
 }
 
 void Visualizer::init(int width, int height) {
+    running = true;
     vkState = new VulkanState();
     
     glfwInit();
@@ -690,7 +690,7 @@ void Visualizer::cleanup() {
 
 bool Visualizer::is_running() {
     glfwPollEvents();
-    return !glfwWindowShouldClose(vkState->window);
+    return running && !glfwWindowShouldClose(vkState->window);
 }
 
 void Visualizer::clear_buffers() {
@@ -866,16 +866,16 @@ void Visualizer::render_frame(glm::mat4 proj) {
     glfwPollEvents();
 }
 
-void Visualizer::draw_point(pt p, glm::vec4 color) {
+void Visualizer::draw_point(pt<float> p, glm::vec4 color) {
     points.push_back({glm::vec2((float)p.x, (float)p.y), color, glm::vec2(0.0f)});
 }
 
-void Visualizer::draw_line(pt a, pt b, glm::vec4 color) {
+void Visualizer::draw_line(pt<float> a, pt<float> b, glm::vec4 color) {
     lines.push_back({glm::vec2((float)a.x, (float)a.y), color, glm::vec2(0.0f)});
     lines.push_back({glm::vec2((float)b.x, (float)b.y), color, glm::vec2(0.0f)});
 }
 
-void Visualizer::draw_polygon(const std::vector<pt>& poly, glm::vec4 color) {
+void Visualizer::draw_polygon(const std::vector<pt<float>>& poly, glm::vec4 color) {
     if (poly.size() < 3) return;
     for (auto t : triangulate(poly)) {
         auto [p1,p2,p3] = t;
@@ -885,7 +885,7 @@ void Visualizer::draw_polygon(const std::vector<pt>& poly, glm::vec4 color) {
     }
 }
 
-void Visualizer::draw_text(const std::string& text, pt pos, float font_size, glm::vec4 color) {
+void Visualizer::draw_text(const std::string& text, pt<float> pos, float font_size, glm::vec4 color) {
     float scale = font_size / 32.0f;
     float cursor_x = 0.0f;
     float cursor_y = 0.0f;

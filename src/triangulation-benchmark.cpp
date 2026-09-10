@@ -1,5 +1,4 @@
 #include "geom/geom.hpp"
-#include "geom/basics.hpp"
 #include "geom/triangulation.hpp"
 #include "utils/generators/geometry.hpp"
 
@@ -8,7 +7,7 @@ int main() {
     cout << "how many vertices you wanna triangulate?\n";
     int n; cin >> n;
 
-    vector<pt> polygon = random_simple_polygon(n, mn, mx);
+    auto polygon = random_simple_polygon(n, mn, mx);
 
     auto start = chrono::steady_clock::now();
     triangulate(polygon);

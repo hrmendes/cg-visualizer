@@ -12,7 +12,7 @@ int main() {
     bool bezier = true;
     AlgorithmRecorder::GraphLayoutType layout_type = AlgorithmRecorder::GraphLayoutType::FORCE_DIRECTED;
 
-    auto adj = random_weighted_graph(n, m, false, 1, 20);
+    auto adj = random_weighted_graph(n, m, directed, 1, 20);
 
     AlgorithmRecorder recorder(-100, 100, -100, 100);
     auto [node_radius, pos] = recorder.compute_graph_layout(adj, layout_type);
