@@ -647,8 +647,10 @@ public:
             glm::vec4 border_color = {0.25f, 0.25f, 0.25f, 1.0f};
             glm::vec4 text_color = {1.0f, 1.0f, 1.0f, 1.0f};
 
+            float width = grid_maxx-grid_minx;
+            float height = grid_maxy-grid_miny;
             pt bl(x, y);
-            pt tr(grid_maxx, y + 9.0f);
+            pt tr(grid_maxx, y + 0.045f*height);
 
             // ccw
             vector<pt<float>> rect = {bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y)};
@@ -661,24 +663,24 @@ public:
 
             if (autoplay) {
                 vector<pt<float>> play = {
-                    pt(x + 2.0f, y + 2.5f),
-                    pt(x + 2.0f, y + 6.5f),
-                    pt(x + 5.0f, y + 4.5f)
+                    pt(x + 0.01f*width, y + 0.0125f*height),
+                    pt(x + 0.01f*width, y + 0.0325f*height),
+                    pt(x + 0.025f*width, y + 0.0225f*height)
                 };
                 vis.draw_polygon(play, text_color);
             } else {
                 vector<pt<float>> pause_left = {
-                    pt(x + 2.0f, y + 2.5f),
-                    pt(x + 3.0f, y + 2.5f),
-                    pt(x + 3.0f, y + 6.5f),
-                    pt(x + 2.0f, y + 6.5f)
+                    pt(x + 0.01f*width, y + 0.0125f*height),
+                    pt(x + 0.015f*width, y + 0.0125f*height),
+                    pt(x + 0.015f*width, y + 0.0325f*height),
+                    pt(x + 0.01f*width, y + 0.0325f*height)
                 };
 
                 vector<pt<float>> pause_right = {
-                    pt(x + 4.0f, y + 2.5f),
-                    pt(x + 5.0f, y + 2.5f),
-                    pt(x + 5.0f, y + 6.5f),
-                    pt(x + 4.0f, y + 6.5f)
+                    pt(x + 0.02f*width, y + 0.0125f*height),
+                    pt(x + 0.025f*width, y + 0.0125f*height),
+                    pt(x + 0.025f*width, y + 0.0325f*height),
+                    pt(x + 0.022f*width, y + 0.0325f*height)
                 };
 
                 vis.draw_polygon(pause_left, text_color);
@@ -692,8 +694,8 @@ public:
             string speed = to_string(frametime_ms) + " ms";
             string caption = frame + "   " + speed;
             string commands = "   Space: next    Shift+Space: previous    Enter: play/pause    +/-: speed    R: restart    Esc: exit";
-            vis.draw_text(caption, pt(x + 8.0f, y + 4.25f), 3.0f, text_color);
-            vis.draw_text(commands, pt(x + 30.0f, y + 4.0f), 2.5f, text_color);
+            vis.draw_text(caption, pt(x + 0.04f*width, y + 0.02125f*height), 0.015f*height, text_color);
+            vis.draw_text(commands, pt(x + 0.15f*width, y + 0.02f*height), 0.0125f*height, text_color);
         };
 
         while (vis.is_running()) {

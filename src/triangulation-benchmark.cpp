@@ -3,7 +3,7 @@
 #include "utils/generators/geometry.hpp"
 
 int main() {
-    int mn = -2000000, mx = 2000000;
+    long long mn = -1e12, mx = 1e12;
     cout << "how many vertices you wanna triangulate?\n";
     int n; cin >> n;
 
@@ -16,14 +16,6 @@ int main() {
     auto delta = chrono::duration_cast<chrono::milliseconds>(end - start);
 
     cout << "triangulate O(n^2): " << delta.count() << " ms\n";
-
-    start = chrono::steady_clock::now();
-    triangulate_deprecated(polygon);
-    end = chrono::steady_clock::now();
-
-    delta = chrono::duration_cast<chrono::milliseconds>(end - start);
-
-    cout << "triangulate_deprecated O(n^3): " << delta.count() << " ms\n";
 
     return 0;
 }
