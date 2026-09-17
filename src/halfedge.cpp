@@ -24,8 +24,8 @@ int main() {
 
     int n = 10;
 
-    //    auto poly = random_simple_polygon(n,mn,mx);
-    auto poly = regular_polygon<T>(n,mn,mx);
+    auto poly = random_simple_polygon(n,mn,mx);
+    // auto poly = regular_polygon<T>(n,mn,mx);
     auto triangulation = triangulate(poly);
 
     recorder.record_polygon(poly, {0.8,0.8,0.8,0.4});
@@ -136,7 +136,7 @@ int main() {
             recorder.record_line(p3,p1,BLUE);
         }
         for (auto &e : halfedges) draw_half_edge(e, BLACK);
-       
+
         for (int face = 0; face < faces; face++){
             draw_text(face_centroid[face], to_string(face), BLACK);
         }
@@ -152,12 +152,12 @@ int main() {
         auto e = face_edge[face];
         auto v = e;
         do {
-           draw_half_edge(v, RED);
-           v = v->next;
+            draw_half_edge(v, RED);
+            v = v->next;
         } while(v != e);
         recorder.commit_step();
     }
-    
+
     // point walking
     for (auto p : poly){
         draw_base();
@@ -186,6 +186,60 @@ int main() {
         recorder.commit_step();
     }
 
+    auto merge_face = [&](HalfEdge<T>* e) -> bool {
+        if (!e || !e->twin) return false; // border edge
+
+        HalfEdge<T>* t = e->twin;
+
+        // "antenna" cant merge 2 faces
+        if (e->next == t || t->next == e) return false;
+
+        HalfEdge<T>* prev_e = e->prev;
+        HalfEdge<T>* next_e = e->next;
+        HalfEdge<T>* prev_t = t->prev;
+        HalfEdge<T>* next_t = t->next;
+
+        prev_e->next = next_t;
+        next_e->prev = prev_t;
+        prev_t->next = next_e;
+        next_t->prev = prev_e;
+
+        if (pt_out_edge[e->source] == e) pt_out_edge[e->source] = next_t;
+        if (pt_out_edge[t->source] == t) pt_out_edge[t->source] = next_e;
+
+        delete e; delete t;
+        return true;
+    };
+
+    // 'a' and 'b' must belong to the same face cycle and cannot share the same source.
+    auto split_face = [&](HalfEdge<T>* a, HalfEdge<T>* b) -> bool {
+        if (!a || !b || a == b || a->source == b->source) return false;
+
+        HalfEdge<T>* v = a->next;
+        while (v && v != a && v != b) v = v->next;
+        if (v != b) return false; // Not in the same face
+
+        auto* e = new HalfEdge<T>(a->source);
+        auto* t = new HalfEdge<T>(b->source);
+
+        e->twin = t;
+        t->twin = e;
+
+        HalfEdge<T>* prev_a = a->prev;
+        HalfEdge<T>* prev_b = b->prev;
+
+        prev_a->next = e;
+        e->prev = prev_a;
+        e->next = b;
+        b->prev = e;
+
+        prev_b->next = t;
+        t->prev = prev_b;
+        t->next = a;
+        a->prev = t;
+
+        return true;
+    };
 
     recorder.run();
 
