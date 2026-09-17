@@ -165,10 +165,24 @@ vector<pt<T>> random_spiral_polygon(int n, T min_c, T max_c) {
     return pts;
 }
 
+template<class T>
+vector<pt<T>> regular_polygon(int n, T min_c, T max_c){
+    ld cx = (max_c + min_c)/2.0;
+    ld cy = (max_c + min_c)/2.0;
+    ld width = max_c - min_c;
+    ld r = random_float(0.25*width, 0.45*width);
+    vector<pt<T>> pts(n);
+    ld step = 2*M_PI/n;
+    for (int i = 0; i < n; i++){
+        pts[i] = { cx + r*cos(step*i), cy + r*sin(step*i) };
+    }
+    return pts;
+}
+
 // Selects randomly among all strategies
 template<class T>
 vector<pt<T>> random_simple_polygon(int n, T min_c, T max_c) {
-    uniform_int_distribution<int> dist(0, 3);
+    uniform_int_distribution<int> dist(0, 4);
     int type = dist(rng);
 
     switch (type) {
@@ -176,6 +190,8 @@ vector<pt<T>> random_simple_polygon(int n, T min_c, T max_c) {
         case 1: return random_comb_polygon(n, min_c, max_c);
         case 2: return random_spiked_star_polygon(n, min_c, max_c);
         case 3: return random_spiral_polygon(n, min_c, max_c);
+        case 4: return regular_polygon(n, min_c, max_c);
         default: return random_angular_polygon(n, min_c, max_c);
     }
 }
+

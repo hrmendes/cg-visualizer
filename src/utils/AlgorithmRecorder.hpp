@@ -56,11 +56,9 @@ public:
         {}
     };
 
-
     struct Frame {
         vector<Command> commands;
     };
-
 
     AlgorithmRecorder(
         float grid_minx, float grid_maxx, 
@@ -495,7 +493,7 @@ public:
         current_frame = 0;
     }
 
-    void run(int frametime_ms = 500) {
+    void run(int frametime_ms = 1000) {
         bool space_prev = false;
         bool enter_prev = false;
         bool r_prev = false;

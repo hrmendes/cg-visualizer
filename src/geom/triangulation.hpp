@@ -117,6 +117,10 @@ vector<tri<T>> triangulate(vector<pt<T>> poly){
         ans.push_back({poly[a], poly[b], poly[c]});
     }
 
+    // ensure all triangles are ccw
+    for (auto &[p1,p2,p3] : ans){
+        if (!ccw(p1,p2,p3)) swap(p1,p2);
+    }
     return ans;
 }
 
