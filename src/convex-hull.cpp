@@ -16,18 +16,23 @@ int main() {
 
     AlgorithmRecorder recorder(mn,mx,mn,mx);
 
+    pts.push_back({-90,-90});
+    pts.push_back({-80,-90});
+    pts.push_back({-70,-90});
+    n += 3;
 
     sort(pts.begin(),pts.end());
+    pts.erase(unique(pts.begin(),pts.end()), pts.end());
 
     bool include_collinear = false;
     auto check = [&](pt<T> a, pt<T> b, pt<T> c) -> bool {
         if (include_collinear)
-            return !ccw(a,b,c);
-        return ccw(c,b,a);
+            return ccw(c,b,a);
+        return !ccw(a,b,c);
     };
 
     auto draw_pt = [&](pt<T> p, glm::vec4 color){
-        recorder.record_circle(p, 0.01*(mx-mn), color);
+        recorder.record_circle(p, 0.003*(mx-mn), color);
     };
 
     vector<pt<T>> lower, upper;
