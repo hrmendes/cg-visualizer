@@ -26,6 +26,9 @@ struct pt {
     bool operator==(const pt p) const { 
         return sgn(x-p.x) == 0 && sgn(y-p.y) == 0; 
     }
+    bool operator!=(const pt p) const {
+        return !(*this==p);
+    }
     pt operator+(pt p) const {return pt(x+p.x, y+p.y);}
     pt operator-(pt p) const {return pt(x-p.x, y-p.y);}
     pt operator*(T c) const {return pt(x*c, y*c);}
