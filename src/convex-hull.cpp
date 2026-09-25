@@ -81,7 +81,12 @@ int main() {
     auto hull = lower;
     hull.insert(hull.end(), upper.begin(),upper.end());
 
-    recorder.record_polygon(hull, TRANSPARENT, BLACK, BLACK);
+    for (auto p : pts) draw_pt(p, BLACK);
+    for (int i = 0; i < hull.size(); i++){
+        draw_pt(hull[i], DARK_GREEN);
+        recorder.record_line(hull[i], hull[(i+1)%hull.size()], DARK_GREEN);
+    }
+
     recorder.commit_step();
 
     recorder.run(500);
