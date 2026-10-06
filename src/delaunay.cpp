@@ -53,11 +53,12 @@ QuadEdge* connect(QuadEdge *a, QuadEdge *b){
     QuadEdge *e = make_edge(a->dest(), b->org);
     splice(e, a->next());
     splice(e->rev(), b);
+    return e;
 }
 
 template<class T>
 T det3(T a1, T a2, T a3, T b1, T b2, T b3, T c1, T c2, T c3){
-    return a1*(b2*c2 - c3*c2) - a2*(b1*c3 - b3*c2) + a3*(b1*c2 - b2*c1);
+    return a1*(b2*c3 - b3*c2) - a2*(b1*c3 - b3*c1) + a3*(b1*c2 - b2*c1);
 }
 // true if d is in circle defined by a,b,c
 bool in_circle(pt a, pt b, pt c, pt d){
@@ -140,6 +141,7 @@ pair<QuadEdge*, QuadEdge*> delaunay(int l, int r, vector<pt> &p){
 
 vector<tri<T>> triangulate(vector<pt> p) {
     sort(p.begin(),p.end());
+    p.erase(unique(p.begin(), p.end()), p.end());
     auto res = delaunay(0, p.size()-1, p);
     auto e = res.first;
     vector<QuadEdge*> edges = {e};
