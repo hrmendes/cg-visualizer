@@ -527,7 +527,6 @@ void Visualizer::init(int width, int height) {
     vkb::PhysicalDeviceSelector selector{vkb_inst};
     auto phys_ret = selector.set_surface(vkState->surface)
         .set_minimum_version(1, 3)
-        .prefer_gpu_device_type(vkb::PreferredDeviceType::integrated)
         .select();
     
     vkb::PhysicalDevice vkb_phys_dev = phys_ret.value();

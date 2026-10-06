@@ -6,7 +6,7 @@ using namespace std;
 #define sq(x) ((x)*(x))
 
 using ld = long double;
-const ld DINF = 2e18;
+const ld inf = 2e18;
 const ld pi = acosl(-1.0);
 const ld eps = 1e-9;
 
