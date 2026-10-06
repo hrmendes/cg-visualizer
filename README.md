@@ -20,3 +20,7 @@ Work in progress.
 
 More algorithms, visualization features, and recording functionality will be added over time.
 
+# System pre-requisites
+```sh
+sudo apt install build-essential cmake libvulkan-dev vulkan-tools libglfw3-dev glslang-tools libglm-dev
+```
