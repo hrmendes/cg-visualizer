@@ -10,7 +10,7 @@ using T = int;
 
 int main() {
     int n; cin >> n;
-    int mn = -100, mx = 100;
+    int mn = -120, mx = 120;
     vector<pt<T>> pts(n);
     for (auto &p : pts) p = random_pt(mn,mx);
 
@@ -36,6 +36,7 @@ int main() {
     };
 
     vector<pt<T>> lower, upper;
+    vector<vector<pt<T>>> triangles;
     auto draw_base = [&]() -> void {
         for (auto p : pts) draw_pt(p, BLACK);
         for (auto p : lower) draw_pt(p, SEAGREEN);
@@ -45,6 +46,9 @@ int main() {
         }
         for (int i = 0; i+1 < upper.size(); i++){
             recorder.record_line(upper[i], upper[i+1], BLUE);
+        }
+        for (auto t : triangles){
+            recorder.record_polygon(t, {.7,.2,.2,.4}, {.7,.2,.2,.4}, {.7,.2,.2,.4});
         }
     };
     draw_base();
@@ -58,6 +62,7 @@ int main() {
             recorder.record_line(lower[lower.size()-2], lower[lower.size()-1], RED);
             recorder.record_line(lower[lower.size()-1], pts[i], RED);
             recorder.commit_step();
+            triangles.push_back({lower[lower.size()-2], lower[lower.size()-1], pts[i]});
             lower.pop_back();
         }
         lower.push_back(pts[i]);
@@ -73,6 +78,7 @@ int main() {
             recorder.record_line(upper[upper.size()-2], upper[upper.size()-1], RED);
             recorder.record_line(upper[upper.size()-1], pts[i], RED);
             recorder.commit_step();
+            triangles.push_back({upper[upper.size()-2], upper[upper.size()-1], pts[i]});
             upper.pop_back();
         }
         upper.push_back(pts[i]);
@@ -88,6 +94,8 @@ int main() {
     }
 
     recorder.commit_step();
+
+    draw_base(); recorder.commit_step();
 
     recorder.run(500);
     return 0;
