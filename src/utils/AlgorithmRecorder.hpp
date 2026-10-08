@@ -754,7 +754,8 @@ private:
             }
 
             if (shift && space && !space_prev) {
-                if (!timeline.empty() && current_frame > 0) current_frame--;
+                current_frame--;
+                if (current_frame == -1) current_frame = timeline.size()-1;
                 autoplay = false;
             } 
             else if (!shift && space && !space_prev) {
