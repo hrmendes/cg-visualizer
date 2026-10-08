@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <GLFW/glfw3.h>
+#include <iostream>
 
 #include "../geom/geom.hpp"
 #include "./generators/primitives.hpp"
@@ -69,22 +70,20 @@ public:
         vis.init(screenWidth, screenHeight);
     }
 
+    // Ativa o bloqueio a cada commit_step() para debug em tempo real
+    void set_live_debug(bool enable) {
+        live_debug = enable;
+        last_time = glfwGetTime();
+    }
+
     template<class T>
     void record_point(pt<T> p, glm::vec4 color = BLACK) {
-        current_frame_commands.emplace_back(
-            DRAW_POINT,
-            vector<pt<float>>{to_float(p)},
-            color
-        );
+        current_frame_commands.emplace_back(DRAW_POINT, vector<pt<float>>{to_float(p)}, color);
     }
 
     template<class T>
     void record_line(pt<T> a, pt<T> b, glm::vec4 color = BLACK) {
-        current_frame_commands.emplace_back(
-            DRAW_LINE,
-            vector<pt<float>>{to_float(a), to_float(b)},
-            color
-        );
+        current_frame_commands.emplace_back(DRAW_LINE, vector<pt<float>>{to_float(a), to_float(b)}, color);
     }
 
     template<class T>
@@ -121,21 +120,17 @@ public:
 
     template<class T>
     void record_text(const string &text, const pt<T> &position, float font_size, glm::vec4 color = BLACK) {
-        current_frame_commands.emplace_back(
-            DRAW_TEXT, vector<pt<float>>{to_float(position)}, color, TRANSPARENT, font_size, text
-        );
+        current_frame_commands.emplace_back(DRAW_TEXT, vector<pt<float>>{to_float(position)}, color, TRANSPARENT, font_size, text);
     }
 
     void record_log(string log_msg) {
         current_frame_commands.emplace_back(LOG, vector<pt<float>>{}, TRANSPARENT, TRANSPARENT, 0, log_msg);
     }
 
-
     // Graph drawing (for both general graphs and trees)
 
     void record_weighted_graph(const vector<vector<pair<int, int>>> &adj, const vector<pt<float>>& layout, const float node_radius, bool directed, bool bezier) {
         int n = sz(adj);
-
         for (int u = 0; u < n; u++) {
             for (auto [v,w] : adj[u]) {
                 pt mid = draw_edge(layout, u, v, node_radius, directed, bezier || (u==v));
@@ -145,7 +140,6 @@ public:
                 record_text(ws, mid, 0.8*node_radius, BLACK);
             }
         }
-
         for (int i = 0; i < n; i++) {
             draw_graph_node(layout[i], node_radius, to_string(i));
         }
@@ -153,13 +147,11 @@ public:
 
     void record_unweighted_graph(const vector<vector<int>> &adj, const vector<pt<float>>& layout, const float node_radius, bool directed, bool bezier) {
         int n = sz(adj);
-
         for (int u = 0; u < n; u++) {
             for (int v : adj[u]) {
                 draw_edge(layout, u, v, node_radius, directed, bezier || (u==v));
             }
         }
-
         for (int i = 0; i < n; i++) {
             draw_graph_node(layout[i], node_radius, to_string(i));
         }
@@ -214,7 +206,6 @@ public:
         return {node_radius, pos};
     }
 
-
     // Graph layout
 
     pair<float, vector<pt<float>>> compute_graph_layout(const vector<vector<pair<int,int>>>& adj, GraphLayoutType layout_type) {
@@ -261,9 +252,7 @@ public:
             };
 
             for (int i = 0; i < n; i++) {
-                if (color[i] == -1) {
-                    dfs(dfs, i, 0);
-                }
+                if (color[i] == -1) dfs(dfs, i, 0);
             }
 
             float x_left = 0.6*grid_minx;
@@ -290,7 +279,6 @@ public:
             int source = 0;
             int sink = n - 1;
 
-            // bfs p dividir em camadas
             vector<int> layer(n, -1);
             queue<int> q;
             layer[source] = 0;
@@ -306,15 +294,13 @@ public:
             }
 
             int max_layer = *max_element(layer.begin(), layer.end());
-            layer[sink] = max_layer; // force it
+            layer[sink] = max_layer; 
 
             vector<vector<int>> layers(max_layer + 1);
 
             for (int i = 0; i < n; i++) {
                 if (i == source || i == sink) continue;
-                if (layer[i] == -1)  // desconectado?
-                    layer[i] = max_layer / 2;
-
+                if (layer[i] == -1) layer[i] = max_layer / 2;
                 layers[layer[i]].push_back(i);
             }
 
@@ -327,9 +313,7 @@ public:
 
             for (int l = 1; l < max_layer; l++) {
                 if (layers[l].empty()) continue;
-
                 float x = left_x + (right_x-left_x) * ((float)l / max_layer);
-
                 float step = 0.8f * (grid_maxy - grid_miny) / layers[l].size();
                 float y = center_y + step * (layers[l].size() - 1) / 2.0f;
 
@@ -342,7 +326,6 @@ public:
 
         auto compute_force_directed_layout = [&]() -> void {
             float area = width * height;
-            
             for (auto &[x,y] : pos) {
                 x = random_float(grid_minx, grid_maxx);
                 y = random_float(grid_miny, grid_maxy);
@@ -352,8 +335,6 @@ public:
 
             for (int iter = 0; iter < 2000; iter++) {
                 vector<pt<float>> disp(n);
-
-                // Repulsão
                 for (int i = 0; i < n; i++) {
                     for (int j = 0; j < n; j++) {
                         if (i == j) continue;
@@ -374,7 +355,6 @@ public:
                     }
                 }
 
-                // Atração por arestas
                 for (int u = 0; u < n; u++) {
                     for (int v : adj[u]) {
                         if (u >= v) continue;
@@ -397,7 +377,6 @@ public:
                     }
                 }
 
-                // Gravidade central p desgrudar da parede
                 float center_x = (grid_minx + grid_maxx) / 2.0;
                 float center_y = (grid_miny + grid_maxy) / 2.0;
 
@@ -407,13 +386,11 @@ public:
                     float dist = sqrt(dx*dx + dy*dy);
                     if (dist > 1e-3) {
                         float attr = (dist * dist * 6  ) / k;
-                        // Puxa suavemente para o centro da tela
                         disp[i].x += (dx / dist) * attr;
                         disp[i].y += (dy / dist) * attr;
                     }
                 }
 
-                // Repulsão entre nós e o meio das arestas, tentando evitar colinearidade
                 for (int i = 0; i < n; i++) {
                     for (int u = 0; u < n; u++) {
                         for (int v : adj[u]) {
@@ -441,7 +418,6 @@ public:
                     }
                 }
 
-                // noise p deixar mais natural e sair de minimos locais
                 for (int i = 0; i < n; i++) {
                     float noise_x = (random_float(-1.0f, 1.0f)) * (t * 0.05f);
                     float noise_y = (random_float(-1.0f, 1.0f)) * (t * 0.05f);
@@ -462,7 +438,7 @@ public:
                     pos[i].y = clamp(pos[i].y, grid_miny + 10.0f, grid_maxy - 10.0f);
                 }
 
-                t *= 0.999; // esfria
+                t *= 0.999;
             }
         };
 
@@ -485,6 +461,12 @@ public:
     void commit_step() {
         timeline.push_back({current_frame_commands});
         current_frame_commands.clear();
+        
+        // Bloqueia e executa o visualizador imediatamente se o debug em tempo real estiver ativo
+        if (live_debug) {
+            current_frame = timeline.size() - 1;
+            run_interactive_loop(true);
+        }
     }
 
     void clear() {
@@ -493,220 +475,10 @@ public:
         current_frame = 0;
     }
 
-    void run(int frametime_ms = 1000) {
-        bool space_prev = false;
-        bool enter_prev = false;
-        bool r_prev = false;
-        bool home_prev = false;
-        bool end_prev = false;
-        bool plus_prev = false;
-        bool minus_prev = false;
-
-        bool autoplay = false;
-        double last_time = glfwGetTime();
-        size_t last_frame = current_frame-1;
-
-        auto handle_input = [&]() -> void {
-            bool space = vis.is_key_pressed(GLFW_KEY_SPACE);
-            bool shift = vis.is_key_pressed(GLFW_KEY_LEFT_SHIFT);
-            bool enter = vis.is_key_pressed(GLFW_KEY_ENTER);
-            bool r = vis.is_key_pressed(GLFW_KEY_R);
-            bool home = vis.is_key_pressed(GLFW_KEY_HOME);
-            bool end = vis.is_key_pressed(GLFW_KEY_END);
-            bool esc = vis.is_key_pressed(GLFW_KEY_ESCAPE);
-            bool plus = vis.is_key_pressed(GLFW_KEY_EQUAL);
-            bool minus = vis.is_key_pressed(GLFW_KEY_MINUS);
-
-            if (shift && space && !space_prev) {
-                if (!timeline.empty()) {
-                    current_frame = (current_frame + timeline.size() - 1) % timeline.size();
-                }
-            }
-            else if (!shift && space && !space_prev) {
-                if (!timeline.empty()) {
-                    current_frame = (current_frame + 1) % timeline.size();
-                }
-            }
-
-            if (enter && !enter_prev) {
-                autoplay = !autoplay;
-            }
-
-            if (r && !r_prev) {
-                current_frame = 0;
-                autoplay = false;
-            }
-
-            if (home && !home_prev) {
-                current_frame = 0;
-                autoplay = false;
-            }
-
-            if (end && !end_prev) {
-                if (!timeline.empty()) {
-                    current_frame = timeline.size() - 1;
-                }
-                autoplay = false;
-            }
-
-            if (plus && !plus_prev) {
-                frametime_ms = max(50, frametime_ms - 50);
-                cout << "[Speed] " << frametime_ms << " ms" << endl;
-            }
-
-            if (minus && !minus_prev) {
-                frametime_ms = min(5000, frametime_ms + 50);
-                cout << "[Speed] " << frametime_ms << " ms" << endl;
-            }
-
-            if (esc) vis.stop();
-
-            space_prev = space;
-            enter_prev = enter;
-            r_prev = r;
-            home_prev = home;
-            end_prev = end;
-            plus_prev = plus;
-            minus_prev = minus;
-        };
-
-        auto update_playback = [&]() -> void {
-            if (autoplay && !timeline.empty()) {
-                double cur_time = glfwGetTime();
-                if (cur_time - last_time > frametime_ms / 1000.0) {
-                    current_frame = (current_frame + 1) % timeline.size();
-                    last_time = cur_time;
-                }
-            } else {
-                last_time = glfwGetTime();
-            }
-        };
-
-        auto render_command = [&](const Command& cmd) -> void {
-            if (cmd.type == DRAW_POINT) {
-                vis.draw_point(cmd.points[0], cmd.color);
-            }
-            else if (cmd.type == DRAW_LINE) {
-                vis.draw_line(cmd.points[0], cmd.points[1], cmd.color);
-            }
-            else if (cmd.type == DRAW_POLYGON) {
-                vis.draw_polygon(cmd.points, cmd.color);
-            }
-            else if (cmd.type == DRAW_HIGHLIGHT) {
-                float pulse = (sin(8*glfwGetTime()) + 1)*0.5;
-                float r = cmd.radius + (pulse * cmd.radius * 0.5);
-                auto circle = get_circle_polygon(cmd.points[0], r);
-                for (int i = 0; i < (int)circle.size(); i++){
-                    pt p1 = circle[i];
-                    pt p2 = circle[(i+1)%circle.size()];
-                    vis.draw_line(p1, p2, cmd.color);
-                }
-            }
-            else if (cmd.type == DRAW_CIRCLE) {
-                auto circle = get_circle_polygon(cmd.points[0], cmd.radius);
-                vis.draw_polygon(circle, cmd.color);
-                for (int i = 0; i < (int)circle.size(); i++){
-                    pt p1 = circle[i];
-                    pt p2 = circle[(i+1)%circle.size()];
-                    vis.draw_line(p1, p2, cmd.secondary_color);
-                }
-            }
-            else if (cmd.type == DRAW_RECTANGLE) {
-                pt bl = cmd.points[0];
-                pt tr = cmd.points[1];
-                vector<pt<float>> rect = { bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y) };
-                vis.draw_polygon(rect, cmd.color);
-                for (int s = 0; s < 4; s++) {
-                    vis.draw_line(rect[s], rect[(s+1) % 4], cmd.secondary_color);
-                }
-            }
-            else if (cmd.type == DRAW_TEXT) {
-                vis.draw_text(cmd.text, cmd.points[0], cmd.radius, cmd.color);
-            }
-            else if (cmd.type == LOG) {
-                if (last_frame != current_frame)
-                    cout << "[LOG]: " << cmd.text << endl;
-            }
-        };
-
-        auto render_current_frame = [&]() -> void {
-            if (timeline.empty()) return;
-
-            for (const auto& cmd : timeline[current_frame].commands) {
-                render_command(cmd);
-            }
-        };
-
-        auto render_hud = [&]() -> void {
-            const float x = grid_minx;
-            const float y = grid_miny;
-
-            glm::vec4 hud_color = {0.02f, 0.02f, 0.02f, 0.92f};
-            glm::vec4 border_color = {0.25f, 0.25f, 0.25f, 1.0f};
-            glm::vec4 text_color = {1.0f, 1.0f, 1.0f, 1.0f};
-
-            float width = grid_maxx-grid_minx;
-            float height = grid_maxy-grid_miny;
-            pt bl(x, y);
-            pt tr(grid_maxx, y + 0.045f*height);
-
-            // ccw
-            vector<pt<float>> rect = {bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y)};
-
-            vis.draw_polygon(rect, hud_color);
-
-            for (int s = 0; s < 4; s++) {
-                vis.draw_line(rect[s], rect[(s + 1) % 4], border_color);
-            }
-
-            if (autoplay) {
-                vector<pt<float>> play = {
-                    pt(x + 0.01f*width, y + 0.0125f*height),
-                    pt(x + 0.01f*width, y + 0.0325f*height),
-                    pt(x + 0.025f*width, y + 0.0225f*height)
-                };
-                vis.draw_polygon(play, text_color);
-            } else {
-                vector<pt<float>> pause_left = {
-                    pt(x + 0.01f*width, y + 0.0125f*height),
-                    pt(x + 0.015f*width, y + 0.0125f*height),
-                    pt(x + 0.015f*width, y + 0.0325f*height),
-                    pt(x + 0.01f*width, y + 0.0325f*height)
-                };
-
-                vector<pt<float>> pause_right = {
-                    pt(x + 0.02f*width, y + 0.0125f*height),
-                    pt(x + 0.025f*width, y + 0.0125f*height),
-                    pt(x + 0.025f*width, y + 0.0325f*height),
-                    pt(x + 0.022f*width, y + 0.0325f*height)
-                };
-
-                vis.draw_polygon(pause_left, text_color);
-                vis.draw_polygon(pause_right, text_color);
-            }
-
-            string frame = timeline.empty()
-                ? "- / 0"
-                : to_string(current_frame+1) + " / " + to_string(timeline.size());
-
-            string speed = to_string(frametime_ms) + " ms";
-            string caption = frame + "   " + speed;
-            string commands = "   Space: next    Shift+Space: previous    Enter: play/pause    +/-: speed    R: restart    Esc: exit";
-            vis.draw_text(caption, pt(x + 0.04f*width, y + 0.02125f*height), 0.015f*height, text_color);
-            vis.draw_text(commands, pt(x + 0.15f*width, y + 0.02f*height), 0.0125f*height, text_color);
-        };
-
-        while (vis.is_running()) {
-            handle_input();
-            update_playback();
-            vis.clear_buffers();
-            render_current_frame();
-            render_hud();
-            vis.render_frame(proj);
-            last_frame = current_frame;
-        }
+    void run(int default_frametime_ms = 1000) {
+        frametime_ms = default_frametime_ms;
+        run_interactive_loop(false);
     }
-
 
     // Helper methods
 
@@ -808,7 +580,7 @@ public:
         }
         if (directed) draw_arrow_head(curve[segments-2], curve[segments-1], node_radius, color);
         
-        return f(0.5); // mid point to draw weight
+        return f(0.5); 
     }
 
     void draw_graph_node(pt<float> pos, float radius, string label, glm::vec4 color = {0.8, 0.9, 1.0, 1.0}) {
@@ -823,6 +595,7 @@ private:
     vector<Command> current_frame_commands;
     vector<Frame> timeline;
     size_t current_frame = 0;
+    size_t last_rendered_frame = -1;
 
     Visualizer vis;
     glm::mat4 proj;
@@ -832,9 +605,215 @@ private:
     float grid_miny;
     float grid_maxy;
 
+    // Estados do Player
+    bool live_debug = false;
+    bool autoplay = false;
+    double last_time = 0;
+    int frametime_ms = 1000;
+    
+    // Controles de Keyboard State
+    bool space_prev = false;
+    bool enter_prev = false;
+    bool r_prev = false;
+    bool home_prev = false;
+    bool end_prev = false;
+    bool plus_prev = false;
+    bool minus_prev = false;
 
     template<class T>
     static pt<float> to_float(const pt<T>& p) {
         return pt<float>(static_cast<float>(p.x), static_cast<float>(p.y));
+    }
+
+    void render_command(const Command& cmd, bool frame_changed) {
+        if (cmd.type == DRAW_POINT) {
+            vis.draw_point(cmd.points[0], cmd.color);
+        }
+        else if (cmd.type == DRAW_LINE) {
+            vis.draw_line(cmd.points[0], cmd.points[1], cmd.color);
+        }
+        else if (cmd.type == DRAW_POLYGON) {
+            vis.draw_polygon(cmd.points, cmd.color);
+        }
+        else if (cmd.type == DRAW_HIGHLIGHT) {
+            float pulse = (sin(8*glfwGetTime()) + 1)*0.5;
+            float r = cmd.radius + (pulse * cmd.radius * 0.5);
+            auto circle = get_circle_polygon(cmd.points[0], r);
+            for (int i = 0; i < (int)circle.size(); i++){
+                pt p1 = circle[i];
+                pt p2 = circle[(i+1)%circle.size()];
+                vis.draw_line(p1, p2, cmd.color);
+            }
+        }
+        else if (cmd.type == DRAW_CIRCLE) {
+            auto circle = get_circle_polygon(cmd.points[0], cmd.radius);
+            vis.draw_polygon(circle, cmd.color);
+            for (int i = 0; i < (int)circle.size(); i++){
+                pt p1 = circle[i];
+                pt p2 = circle[(i+1)%circle.size()];
+                vis.draw_line(p1, p2, cmd.secondary_color);
+            }
+        }
+        else if (cmd.type == DRAW_RECTANGLE) {
+            pt bl = cmd.points[0];
+            pt tr = cmd.points[1];
+            vector<pt<float>> rect = { bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y) };
+            vis.draw_polygon(rect, cmd.color);
+            for (int s = 0; s < 4; s++) {
+                vis.draw_line(rect[s], rect[(s+1) % 4], cmd.secondary_color);
+            }
+        }
+        else if (cmd.type == DRAW_TEXT) {
+            vis.draw_text(cmd.text, cmd.points[0], cmd.radius, cmd.color);
+        }
+        else if (cmd.type == LOG) {
+            if (frame_changed) cout << "[LOG]: " << cmd.text << endl;
+        }
+    }
+
+    void render_current_frame() {
+        if (timeline.empty()) return;
+
+        bool frame_changed = (last_rendered_frame != current_frame);
+        for (const auto& cmd : timeline[current_frame].commands) {
+            render_command(cmd, frame_changed);
+        }
+        last_rendered_frame = current_frame;
+    }
+
+    void render_hud(bool is_live) {
+        const float x = grid_minx;
+        const float y = grid_miny;
+
+        glm::vec4 hud_color = {0.02f, 0.02f, 0.02f, 0.92f};
+        glm::vec4 border_color = {0.25f, 0.25f, 0.25f, 1.0f};
+        glm::vec4 text_color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        float width = grid_maxx-grid_minx;
+        float height = grid_maxy-grid_miny;
+        pt bl(x, y);
+        pt tr(grid_maxx, y + 0.045f*height);
+
+        vector<pt<float>> rect = {bl, pt(tr.x, bl.y), tr, pt(bl.x, tr.y)};
+        vis.draw_polygon(rect, hud_color);
+
+        for (int s = 0; s < 4; s++) {
+            vis.draw_line(rect[s], rect[(s + 1) % 4], border_color);
+        }
+
+        if (autoplay) {
+            vector<pt<float>> play = {
+                pt(x + 0.01f*width, y + 0.0125f*height),
+                pt(x + 0.01f*width, y + 0.0325f*height),
+                pt(x + 0.025f*width, y + 0.0225f*height)
+            };
+            vis.draw_polygon(play, text_color);
+        } else {
+            vector<pt<float>> pause_left = {
+                pt(x + 0.01f*width, y + 0.0125f*height),
+                pt(x + 0.015f*width, y + 0.0125f*height),
+                pt(x + 0.015f*width, y + 0.0325f*height),
+                pt(x + 0.01f*width, y + 0.0325f*height)
+            };
+            vector<pt<float>> pause_right = {
+                pt(x + 0.02f*width, y + 0.0125f*height),
+                pt(x + 0.025f*width, y + 0.0125f*height),
+                pt(x + 0.025f*width, y + 0.0325f*height),
+                pt(x + 0.02f*width, y + 0.0325f*height)
+            };
+            vis.draw_polygon(pause_left, text_color);
+            vis.draw_polygon(pause_right, text_color);
+        }
+
+        string mode = is_live ? "[LIVE] " : "";
+        string frame = timeline.empty() ? "- / 0" : to_string(current_frame+1) + " / " + to_string(timeline.size());
+        string speed = to_string(frametime_ms) + " ms";
+        string caption = mode + frame + "   " + speed;
+        string commands = "   Space: next   Shift+Space: previous   Enter: play/pause   +/-: speed   R: restart   Esc: exit";
+        
+        vis.draw_text(caption, pt(x + 0.04f*width, y + 0.02125f*height), 0.015f*height, text_color);
+        vis.draw_text(commands, pt(x + 0.15f*width, y + 0.02f*height), 0.0125f*height, text_color);
+    }
+
+    void run_interactive_loop(bool is_live) {
+        while (vis.is_running()) {
+            bool space = vis.is_key_pressed(GLFW_KEY_SPACE);
+            bool shift = vis.is_key_pressed(GLFW_KEY_LEFT_SHIFT);
+            bool enter = vis.is_key_pressed(GLFW_KEY_ENTER);
+            bool r = vis.is_key_pressed(GLFW_KEY_R);
+            bool home = vis.is_key_pressed(GLFW_KEY_HOME);
+            bool end = vis.is_key_pressed(GLFW_KEY_END);
+            bool esc = vis.is_key_pressed(GLFW_KEY_ESCAPE);
+            bool plus = vis.is_key_pressed(GLFW_KEY_EQUAL);
+            bool minus = vis.is_key_pressed(GLFW_KEY_MINUS);
+
+            if (esc) {
+                vis.stop();
+                if (is_live) exit(0); // Quebra o C++ no meio de loops infinitos caso aperte esc
+                break;
+            }
+
+            if (shift && space && !space_prev) {
+                if (!timeline.empty() && current_frame > 0) current_frame--;
+                autoplay = false;
+            } 
+            else if (!shift && space && !space_prev) {
+                if (current_frame < timeline.size() - 1) {
+                    current_frame++;
+                } else if (is_live) {
+                    space_prev = space; // Salva o estado para evitar duplo gatilho e volta p C++
+                    break;
+                } else if (!timeline.empty()) {
+                    current_frame = (current_frame + 1) % timeline.size();
+                }
+                autoplay = false;
+            }
+
+            if (enter && !enter_prev) autoplay = !autoplay;
+            
+            if (r && !r_prev) { current_frame = 0; autoplay = false; }
+            if (home && !home_prev) { current_frame = 0; autoplay = false; }
+            if (end && !end_prev) { 
+                if (!timeline.empty()) current_frame = timeline.size() - 1; 
+                autoplay = false; 
+            }
+
+            if (plus && !plus_prev) frametime_ms = max(50, frametime_ms - 50);
+            if (minus && !minus_prev) frametime_ms = min(5000, frametime_ms + 50);
+
+            if (autoplay && !timeline.empty()) {
+                double cur_time = glfwGetTime();
+                if (cur_time - last_time > frametime_ms / 1000.0) {
+                    if (current_frame < timeline.size() - 1) {
+                        current_frame++;
+                    } else if (is_live) {
+                        last_time = cur_time;
+                        break; // Deixa o algoritmo prosseguir para o proximo passo automatico
+                    } else {
+                        current_frame = 0;
+                    }
+                    last_time = cur_time;
+                }
+            } else {
+                last_time = glfwGetTime();
+            }
+
+            space_prev = space;
+            enter_prev = enter;
+            r_prev = r;
+            home_prev = home;
+            end_prev = end;
+            plus_prev = plus;
+            minus_prev = minus;
+
+            vis.clear_buffers();
+            render_current_frame();
+            render_hud(is_live);
+            vis.render_frame(proj);
+        }
+
+        if (!vis.is_running() && is_live) {
+            exit(0); // Cancela o algoritmo caso o usuario feche no [X] da janela no meio do loop
+        }
     }
 };
