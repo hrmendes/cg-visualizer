@@ -92,13 +92,13 @@ signed main() {
 
         int i = s1;
         vector<pt> region;
-//        dbg("defining region");
+        dbg("defining region");
         do {
             region.push_back(pts[i]);
             i = nxt[i];
         } while(i != s1);
         recorder.record_polygon(region,{0,.5,0,.5},{0,.5,0,.5},TRANSPARENT);
-//        dbg("defined region");
+        dbg("defined region");
         if (u != -1){
             recorder.record_polygon(
                     vector<pt>{pts[triang[u][0]],pts[triang[u][1]],pts[triang[u][2]]}
@@ -128,7 +128,7 @@ signed main() {
 
     vector<bool> vis(adj.size());
     auto dfs = [&](auto &&dfs, int u) -> void {
-//        dbg(u);
+        dbg(u);
         vis[u] = true;
         draw_base(u);
         recorder.commit_step();
@@ -139,12 +139,12 @@ signed main() {
             if (p3 == p1 || p3 == p2) p3 = triang[v][2];
             int s1 = sgn(sarea2(guard,pts[p1],pts[p3])); // 1 is the left point, must not be ccw
             int s2 = sgn(sarea2(guard,pts[p2],pts[p3])); // 2 is the right point, must not be cw
+
             if (s1 <= 0 && s2 >= 0){
                 nxt[p2] = p3;
                 nxt[p3] = p1;
             } else if (s1 > 0) { // split at p1 (left)
-                // impossible to have 2 reflex angles because they form a triangle
-                // so if one wasnt satisfied, the other must have been
+                dbg("start split left");
                 pts.push_back(intersect(guard,pts[p1],pts[p2],pts[p3]));
                 int p4 = pts.size()-1;
                 nxt.push_back(p1);
@@ -156,31 +156,34 @@ signed main() {
 
                 vis.push_back(true);
                 int newv = adj.size();
-                adj.push_back(adj[v]);
-                for (auto &[x,pt1,pt2] : adj[newv]) {
-                    if (pt1 == p2) {
-                        x = v;
-                        pt1 = p4; 
-                        // pt2 remains the same
-                    } else if (pt2 == p2){
-                        pt2 = p4;
-                        // pt1 and nei id remain the same
-                    } // other face is the same
-                }
-                for (auto &[x,pt1,pt2] : adj[v]) {
-                    if (pt2 == p3){
-                        pt2 = p4;
-                        x = newv;
-                    } else if (pt1 == p3) pt1 = p4;
+                adj.push_back({});
+
+                vector<tuple<int,int,int>> old_adj_v = adj[v];
+                adj[v].clear();
+
+                for (auto [x, pt1, pt2] : old_adj_v) {
+                    if (pt1 == p2 && pt2 == p1) {
+                        adj[v].push_back({x, p2, p1});
+                    } else if (pt1 == p1 && pt2 == p3) {
+                        adj[newv].push_back({x, p1, p3});
+                        // Atualiza o vizinho externo apontando a aresta antiga para a nova metade
+                        for (auto& [nx, npt1, npt2] : adj[x]) {
+                            if (nx == v && npt1 == p3 && npt2 == p1) nx = newv;
+                        }
+                    }
                 }
 
-                triang[v] = {p1,p2,p4};
-                triang.push_back({p1,p4,p3});
+                // Aresta interna nova
+                adj[v].push_back({newv, p1, p4});
+                adj[newv].push_back({v, p4, p1});
+
+                triang[v] = {p1, p2, p4};
+                triang.push_back({p1, p4, p3});
 
                 edge_triang.erase(ii(p2,p3));
                 edge_triang[ii(p4,p3)] = newv;
                 edge_triang[ii(p1,p4)] = newv;
-                edge_triang[ii(p3,p1)] = newv; // this ovewrites v
+                edge_triang[ii(p3,p1)] = newv;
 
                 edge_triang[ii(p2,p4)] = v;
                 edge_triang[ii(p4,p1)] = v;
@@ -192,52 +195,47 @@ signed main() {
                     if (p5==p3 || p5==p2) p5 = triang[other][1];
                     if (p5==p3 || p5==p2) p5 = triang[other][2];
 
-                    triang[other] = {p2,p5,p4};
-                    triang.push_back({p4,p5,p3});
+                    triang[other] = {p4, p2, p5};
+                    triang.push_back({p4, p5, p3});
 
-                    // create an edge between p4 and p5
                     vis.push_back(false);
                     int newv2 = adj.size();
-                    adj.push_back(adj[other]);
-                    for (auto &[x,pt1,pt2] : adj[other]) {
-                        if (pt1 == p3) {
-                            x = newv2;
-                            pt1 = p4;
-                        } else if (pt2 == p3) pt2 = p4;
-                    }
-                    for (auto &[x,pt1,pt2] : adj[newv2]){
-                        if (pt1 == p2) {
-                            pt1 = p4;
-                            x = newv;
-                        } else if (pt2 == p2) {
-                            pt2 = p4;
-                            x = other;
+                    adj.push_back({});
+
+                    vector<tuple<int,int,int>> old_adj_other = adj[other];
+                    adj[other].clear();
+
+                    for (auto [x, pt1, pt2] : old_adj_other) {
+                        if (pt1 == p5 && pt2 == p2) {
+                            adj[other].push_back({x, p5, p2});
+                        } else if (pt1 == p3 && pt2 == p5) {
+                            adj[newv2].push_back({x, p3, p5});
+                            for (auto& [nx, npt1, npt2] : adj[x]) {
+                                if (nx == other && npt1 == p5 && npt2 == p3) nx = newv2;
+                            }
                         }
                     }
 
-                    bool foundnewv2 = false;
-                    for (auto &[x,pt1,pt2] : adj[other]) foundnewv2 &= (x==newv2);
-                    if (!foundnewv2){
-                        adj[other].push_back({newv2,p4,p5});
-                    }
-                    bool foundother = false;
-                    for (auto &[x,pt1,pt2] : adj[newv2]) foundother &= (x==other);
-                    if (!foundother){
-                        adj[newv2].push_back({other,p5,p4});
-                    }
-                }
+                    adj[other].push_back({newv2, p4, p5});
+                    adj[newv2].push_back({other, p5, p4});
 
-                bool foundnewv = false;
-                for (auto &[x,pt1,pt2] : adj[v]) foundnewv &= (x==newv);
-                if (!foundnewv){
-                    adj[v].push_back({v,p1,p4});
+                    adj[other].push_back({v, p2, p4});
+                    adj[v].push_back({other, p4, p2});
+
+                    adj[newv2].push_back({newv, p4, p3});
+                    adj[newv].push_back({newv2, p3, p4});
+
+                    edge_triang[ii(p4,p2)] = other;
+                    edge_triang[ii(p5,p4)] = other;
+                    edge_triang[ii(p2,p5)] = other;
+
+                    edge_triang[ii(p3,p4)] = newv2;
+                    edge_triang[ii(p4,p5)] = newv2;
+                    edge_triang[ii(p5,p3)] = newv2;
                 }
-                bool foundv = false;
-                for (auto &[x,pt1,pt2] : adj[newv]) foundv &= (x==v);
-                if (!foundv){
-                    adj[newv].push_back({v,p4,p1});
-                }
+                dbg("end split left");
             } else { // split at p2 (right)
+                dbg("start split right");
                 pts.push_back(intersect(guard,pts[p2],pts[p1],pts[p3]));
                 int p4 = pts.size()-1;
                 nxt.push_back(p1);
@@ -249,30 +247,32 @@ signed main() {
 
                 vis.push_back(true);
                 int newv = adj.size();
-                adj.push_back(adj[v]);
-                for (auto &[x,pt1,pt2] : adj[newv]) {
-                    if (pt2 == p1) {
-                        x = v;
-                        pt2 = p4; 
-                    } else if (pt1 == p1){
-                        pt1 = p4;
-                        // pt1 and nei id remain the same
-                    } // other face is the same
-                }
-                for (auto &[x,pt1,pt2] : adj[v]) {
-                    if (pt1 == p3){
-                        pt1 = p4;
-                        x = newv;
-                    } else if (pt2 == p3) pt2 = p4;
+                adj.push_back({});
+
+                vector<tuple<int,int,int>> old_adj_v = adj[v];
+                adj[v].clear();
+
+                for (auto [x, pt1, pt2] : old_adj_v) {
+                    if (pt1 == p2 && pt2 == p1) {
+                        adj[v].push_back({x, p2, p1});
+                    } else if (pt1 == p3 && pt2 == p2) {
+                        adj[newv].push_back({x, p3, p2});
+                        for (auto& [nx, npt1, npt2] : adj[x]) {
+                            if (nx == v && npt1 == p2 && npt2 == p3) nx = newv;
+                        }
+                    }
                 }
 
-                triang[v] = {p1,p2,p4};
-                triang.push_back({p2,p3,p4});
+                adj[v].push_back({newv, p4, p2});
+                adj[newv].push_back({v, p2, p4});
+
+                triang[v] = {p1, p2, p4};
+                triang.push_back({p2, p3, p4});
 
                 edge_triang.erase(ii(p3,p1));
                 edge_triang[ii(p3,p4)] = newv;
                 edge_triang[ii(p4,p2)] = newv;
-                edge_triang[ii(p2,p3)] = newv; // this ovewrites v
+                edge_triang[ii(p2,p3)] = newv;
 
                 edge_triang[ii(p2,p4)] = v;
                 edge_triang[ii(p4,p1)] = v;
@@ -284,52 +284,47 @@ signed main() {
                     if (p5==p3 || p5==p1) p5 = triang[other][1];
                     if (p5==p3 || p5==p1) p5 = triang[other][2];
 
-                    triang[other] = {p1,p4,p5};
-                    triang.push_back({p4,p3,p5});
+                    triang[other] = {p1, p4, p5};
+                    triang.push_back({p4, p3, p5});
 
-                    // create an edge between p4 and p5
                     vis.push_back(false);
                     int newv2 = adj.size();
-                    adj.push_back(adj[other]);
-                    for (auto &[x,pt1,pt2] : adj[other]) {
-                        if (pt2 == p3) {
-                            x = newv2;
-                            pt2 = p4;
-                        } else if (pt1 == p3) pt1 = p4;
-                    }
-                    for (auto &[x,pt1,pt2] : adj[newv2]){
-                        if (pt2 == p1) {
-                            pt2 = p4;
-                            x = newv;
-                        } else if (pt1 == p1) {
-                            pt1 = p4;
-                            x = other;
+                    adj.push_back({});
+
+                    vector<tuple<int,int,int>> old_adj_other = adj[other];
+                    adj[other].clear();
+
+                    for (auto [x, pt1, pt2] : old_adj_other) {
+                        if (pt1 == p1 && pt2 == p5) {
+                            adj[other].push_back({x, p1, p5});
+                        } else if (pt1 == p5 && pt2 == p3) {
+                            adj[newv2].push_back({x, p5, p3});
+                            for (auto& [nx, npt1, npt2] : adj[x]) {
+                                if (nx == other && npt1 == p3 && npt2 == p5) nx = newv2;
+                            }
                         }
                     }
-                    bool foundnewv2 = false;
-                    for (auto &[x,pt1,pt2] : adj[other]) foundnewv2 &= (x==newv2);
-                    if (!foundnewv2){
-                        adj[other].push_back({newv2,p5,p4});
-                    }
-                    bool foundother = false;
-                    for (auto &[x,pt1,pt2] : adj[newv2]) foundother &= (x==other);
-                    if (!foundother){
-                        adj[newv2].push_back({other,p4,p5});
-                    }
 
-                }
+                    adj[other].push_back({newv2, p5, p4});
+                    adj[newv2].push_back({other, p4, p5});
 
-                bool foundnewv = false;
-                for (auto &[x,pt1,pt2] : adj[v]) foundnewv &= (x==newv);
-                if (!foundnewv){
-                    adj[v].push_back({v,p4,p2});
+                    adj[other].push_back({v, p4, p1});
+                    adj[v].push_back({other, p1, p4});
+
+                    adj[newv2].push_back({newv, p3, p4});
+                    adj[newv].push_back({newv2, p4, p4});
+
+                    edge_triang[ii(p4,p5)] = other;
+                    edge_triang[ii(p5,p1)] = other;
+                    edge_triang[ii(p1,p4)] = other;
+
+                    edge_triang[ii(p3,p5)] = newv2;
+                    edge_triang[ii(p5,p4)] = newv2;
+                    edge_triang[ii(p4,p3)] = newv2;
                 }
-                bool foundv = false;
-                for (auto &[x,pt1,pt2] : adj[newv]) foundv &= (x==v);
-                if (!foundv){
-                    adj[newv].push_back({v,p2,p4});
-                }
+                dbg("end split right");
             }
+
             dfs(dfs,v);
 
             /*
