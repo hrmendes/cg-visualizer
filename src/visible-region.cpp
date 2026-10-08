@@ -10,6 +10,7 @@ using namespace std;
 #define vvi vector<vi>
 #define all(x) x.begin(),x.end()
 #define ii pair<int,int>
+#define dbg(v) cout << "Line(" << __LINE__ << ") -> " << #v << " = " << (v) << endl
 
 signed main() {
     cout << "Number of points: ";
@@ -22,6 +23,7 @@ signed main() {
     } while(!inpol(poly, guard));
 
     AlgorithmRecorder recorder(mn,mx,mn,mx);
+    recorder.set_live_debug(true);
 
     // currently O(N^2 ears clipping implementation)
     auto triangulation = triangulate(poly);
@@ -90,11 +92,13 @@ signed main() {
 
         int i = s1;
         vector<pt> region;
+//        dbg("defining region");
         do {
             region.push_back(pts[i]);
             i = nxt[i];
         } while(i != s1);
         recorder.record_polygon(region,{0,.5,0,.5},{0,.5,0,.5},TRANSPARENT);
+//        dbg("defined region");
         if (u != -1){
             recorder.record_polygon(
                     vector<pt>{pts[triang[u][0]],pts[triang[u][1]],pts[triang[u][2]]}
@@ -124,6 +128,7 @@ signed main() {
 
     vector<bool> vis(adj.size());
     auto dfs = [&](auto &&dfs, int u) -> void {
+//        dbg(u);
         vis[u] = true;
         draw_base(u);
         recorder.commit_step();
@@ -137,7 +142,7 @@ signed main() {
             if (s1 <= 0 && s2 >= 0){
                 nxt[p2] = p3;
                 nxt[p3] = p1;
-            } else if (s1 > 0) {
+            } else if (s1 > 0) { // split at p1 (left)
                 // impossible to have 2 reflex angles because they form a triangle
                 // so if one wasnt satisfied, the other must have been
                 pts.push_back(intersect(guard,pts[p1],pts[p2],pts[p3]));
@@ -232,7 +237,7 @@ signed main() {
                 if (!foundv){
                     adj[newv].push_back({v,p4,p1});
                 }
-            } else {
+            } else { // split at p2 (right)
                 pts.push_back(intersect(guard,pts[p2],pts[p1],pts[p3]));
                 int p4 = pts.size()-1;
                 nxt.push_back(p1);
@@ -249,7 +254,6 @@ signed main() {
                     if (pt2 == p1) {
                         x = v;
                         pt2 = p4; 
-                        // pt2 remains the same
                     } else if (pt1 == p1){
                         pt1 = p4;
                         // pt1 and nei id remain the same
@@ -263,7 +267,7 @@ signed main() {
                 }
 
                 triang[v] = {p1,p2,p4};
-                triang.push_back({p2,p4,p3});
+                triang.push_back({p2,p3,p4});
 
                 edge_triang.erase(ii(p3,p1));
                 edge_triang[ii(p3,p4)] = newv;
@@ -277,8 +281,8 @@ signed main() {
                     int other = edge_triang[ii(p1,p3)];
                     edge_triang.erase(ii(p1,p3));
                     int p5 = triang[other][0];
-                    if (p5==p3 || p5==p2) p5 = triang[other][1];
-                    if (p5==p3 || p5==p2) p5 = triang[other][2];
+                    if (p5==p3 || p5==p1) p5 = triang[other][1];
+                    if (p5==p3 || p5==p1) p5 = triang[other][2];
 
                     triang[other] = {p1,p4,p5};
                     triang.push_back({p4,p3,p5});
@@ -344,7 +348,6 @@ signed main() {
         i = nxt[i];
     } while(i != s1);
     recorder.record_polygon(region,{0,0,.5,.5},{0,0,.5,.5},TRANSPARENT);
-    for (int i = start_sz; i < pts.size(); i++) draw_pt(pts[i], RED);
 
     draw_pt(guard, BLUE);
     recorder.commit_step();

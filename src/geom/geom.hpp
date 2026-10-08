@@ -35,6 +35,10 @@ struct pt {
     pt operator/(T c) const {return pt(x/c, y/c);}
     T operator*(pt p) const {return x*p.x + y*p.y;}
     T operator^(pt p) const {return x*p.y - y*p.x;}
+    friend ostream& operator<<(ostream &os, const pt &p) {
+        os << "(" << p.x << ", " << p.y << ")";
+        return os;
+    }
 };
 
 template<class T = float>
