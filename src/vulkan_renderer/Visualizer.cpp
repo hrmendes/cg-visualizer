@@ -751,19 +751,50 @@ void Visualizer::clear_buffers() {
     text_vertices.clear();
 }
 
-void Visualizer::render_frame(glm::mat4 proj) {
+void Visualizer::render_frame(glm::mat4 base_proj) {
     vkWaitForFences(vkState->device, 1, &vkState->inFlightFence, VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(vkState->device, vkState->swapChain, UINT64_MAX, vkState->imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreate_swapchain();
-        return; 
+        return;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         std::cout << "ERRO: vkAcquireNextImageKHR falhou." << std::endl;
         return;
     }
+
+    // Calcula a proporção atual da janela para ajustar o zoom proporcional sem distorcer
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(vkState->window, &fbWidth, &fbHeight);
+    if (fbHeight == 0) fbHeight = 1;
+
+    // Extrai os limites originais da matriz base (assumindo que foi criada com glm::ortho(minx, maxx, maxy, miny, ...))
+    // Ou recalcula dinamicamente mantendo a escala do lado maior proporcional:
+    float aspect = (float)fbWidth / (float)fbHeight;
+
+    // Supomos que a sua área útil original de projeto tem largura/altura base (ex: -100 a 100)
+    // Vamos ajustar os limites da projeção mantendo o lado maior fixo e expandindo o lado menor proporcionalmente
+    float base_width = 200.0f;  // Ajuste conforme o seu grid_maxx - grid_minx original
+    float base_height = 200.0f; // Ajuste conforme o seu grid_maxy - grid_miny original
+
+    float proj_left = -base_width / 2.0f;
+    float proj_right = base_width / 2.0f;
+    float proj_bottom = base_height / 2.0f;
+    float proj_top = -base_height / 2.0f;
+
+    if (aspect >= 1.0f) {
+        // Janela mais larga que alta: expande a largura proporcionalmente (Zoom/Fit)
+        proj_left *= aspect;
+        proj_right *= aspect;
+    } else {
+        // Janela mais alta que larga: expande a altura proporcionalmente
+        proj_bottom /= aspect;
+        proj_top /= aspect;
+    }
+
+    glm::mat4 adjusted_proj = glm::ortho(proj_left, proj_right, proj_bottom, proj_top, -1.0f, 1.0f);
 
     vkResetFences(vkState->device, 1, &vkState->inFlightFence);
     vkResetCommandBuffer(vkState->commandBuffer, 0);
@@ -835,7 +866,7 @@ void Visualizer::render_frame(glm::mat4 proj) {
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = vkState->swapChainExtent;
 
-    VkClearValue clearColor = {{{1.0f, 1.0f, 1.0f, 1.0f}}}; 
+    VkClearValue clearColor = {{{1.0f, 1.0f, 1.0f, 1.0f}}};
     renderPassInfo.clearValueCount = 1;
     renderPassInfo.pClearValues = &clearColor;
 
@@ -857,9 +888,10 @@ void Visualizer::render_frame(glm::mat4 proj) {
 
     VkBuffer vertexBuffers[] = {vkState->vertexBuffer};
     VkDeviceSize offsets[] = {0};
-    
+
     vkCmdBindVertexBuffers(vkState->commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdPushConstants(vkState->commandBuffer, vkState->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &proj[0][0]);
+    // Usa a matriz ajustada proporcionalmente ao invés da recebida estaticamente
+    vkCmdPushConstants(vkState->commandBuffer, vkState->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &adjusted_proj[0][0]);
 
     if (!triangles.empty()) {
         vkCmdBindPipeline(vkState->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkState->graphicsPipelineTriangles);
