@@ -27,9 +27,11 @@ public:
     void draw_text(const std::string& text, pt<float> pos, float font_size, glm::vec4 color);
     bool is_key_pressed(int key);
     void stop() { running = false; }
+
+    bool framebufferResized = false;
+
 private:
     std::vector<Vertex> text_vertices;
-
     std::vector<Vertex> points;
     std::vector<Vertex> lines;
     std::vector<Vertex> triangles;
@@ -39,6 +41,7 @@ private:
     void init_pipelines();
     void init_render_resources();
     void init_text_pipeline();
+    void recreate_swapchain();
 
     bool running = true;
 };

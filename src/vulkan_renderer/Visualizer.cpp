@@ -18,6 +18,7 @@ struct VulkanState {
     VkSurfaceKHR surface;
     VkPhysicalDevice physicalDevice;
     VkDevice device;
+    vkb::Device vkb_device; // Guarda o device do vk-bootstrap para recriar a swapchain
     VkQueue graphicsQueue;
     VkQueue presentQueue;
     VkSwapchainKHR swapChain;
@@ -39,7 +40,6 @@ struct VulkanState {
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
 
-    // Recursos de Texto e UTF-8
     VkImage fontImage;
     VkDeviceMemory fontMemory;
     VkImageView fontImageView;
@@ -50,7 +50,6 @@ struct VulkanState {
     VkDescriptorPool textDescriptorPool;
     VkDescriptorSet textDescriptorSet;
 
-    // Buffers Persistentes para atualização do Atlas na GPU
     VkBuffer fontStagingBuffer;
     VkDeviceMemory fontStagingMemory;
     void* fontStagingMapped;
@@ -291,14 +290,12 @@ void Visualizer::init_text_pipeline() {
     vkState->fontBufferStorage.resize(file_size);
     file.read((char*)vkState->fontBufferStorage.data(), file_size);
 
-    // Inicializa o packer
     if (!stbtt_PackBegin(&vkState->spc, vkState->atlasBitmap.data(), bitmap_w, bitmap_h, 0, 1, nullptr)) {
         std::cerr << "ERRO: Falha ao iniciar stbtt_PackBegin" << std::endl;
         return;
     }
     stbtt_PackSetOversampling(&vkState->spc, 2, 2);
 
-    // Pré-carrega ASCII
     stbtt_pack_range range;
     range.font_size = 32.0f;
     range.first_unicode_codepoint_in_range = 32;
@@ -345,7 +342,6 @@ void Visualizer::init_text_pipeline() {
     vkAllocateMemory(vkState->device, &allocInfo, nullptr, &vkState->fontMemory);
     vkBindImageMemory(vkState->device, vkState->fontImage, vkState->fontMemory, 0);
 
-    // Staging buffer PERSISTENTE para atualizações dinâmicas da textura
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = bitmap_w * bitmap_h;
@@ -364,11 +360,9 @@ void Visualizer::init_text_pipeline() {
     vkAllocateMemory(vkState->device, &allocInfo, nullptr, &vkState->fontStagingMemory);
     vkBindBufferMemory(vkState->device, vkState->fontStagingBuffer, vkState->fontStagingMemory, 0);
     
-    // Mapeia permanentemente para evitar overhead de mapeamento em tempo real
     vkMapMemory(vkState->device, vkState->fontStagingMemory, 0, VK_WHOLE_SIZE, 0, &vkState->fontStagingMapped);
     memcpy(vkState->fontStagingMapped, vkState->atlasBitmap.data(), bitmap_w * bitmap_h);
 
-    // Carga inicial
     VkCommandBufferAllocateInfo allocInfoCmd{};
     allocInfoCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfoCmd.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -505,6 +499,59 @@ void Visualizer::init_text_pipeline() {
     vkState->graphicsPipelineText = create_pipeline(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, vkState, vert, text_frag, vkState->textPipelineLayout);
 }
 
+void Visualizer::recreate_swapchain() {
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(vkState->window, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(vkState->window, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(vkState->device);
+
+    for (auto framebuffer : vkState->swapChainFramebuffers) {
+        vkDestroyFramebuffer(vkState->device, framebuffer, nullptr);
+    }
+    vkState->swapChainFramebuffers.clear();
+
+    for (auto imageView : vkState->swapChainImageViews) {
+        vkDestroyImageView(vkState->device, imageView, nullptr);
+    }
+    vkState->swapChainImageViews.clear();
+
+    vkb::SwapchainBuilder swapchain_builder{vkState->vkb_device};
+    auto swap_ret = swapchain_builder
+        .set_old_swapchain(vkState->swapChain)
+        .build();
+
+    if (!swap_ret) {
+        std::cerr << "Falha ao recriar swapchain" << std::endl;
+        return;
+    }
+
+    vkDestroySwapchainKHR(vkState->device, vkState->swapChain, nullptr);
+
+    vkb::Swapchain vkb_swapchain = swap_ret.value();
+    vkState->swapChain = vkb_swapchain.swapchain;
+    vkState->swapChainImages = vkb_swapchain.get_images().value();
+    vkState->swapChainImageViews = vkb_swapchain.get_image_views().value();
+    vkState->swapChainImageFormat = vkb_swapchain.image_format;
+    vkState->swapChainExtent = vkb_swapchain.extent;
+
+    vkState->swapChainFramebuffers.resize(vkState->swapChainImageViews.size());
+    for (size_t i = 0; i < vkState->swapChainImageViews.size(); i++) {
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = vkState->renderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = &vkState->swapChainImageViews[i];
+        framebufferInfo.width = vkState->swapChainExtent.width;
+        framebufferInfo.height = vkState->swapChainExtent.height;
+        framebufferInfo.layers = 1;
+        vkCreateFramebuffer(vkState->device, &framebufferInfo, nullptr, &vkState->swapChainFramebuffers[i]);
+    }
+}
+
 void Visualizer::init(int width, int height) {
     running = true;
     vkState = new VulkanState();
@@ -512,6 +559,12 @@ void Visualizer::init(int width, int height) {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     vkState->window = glfwCreateWindow(width, height, "GeomVulkan", nullptr, nullptr);
+
+    glfwSetWindowUserPointer(vkState->window, this);
+    glfwSetFramebufferSizeCallback(vkState->window, [](GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<Visualizer*>(glfwGetWindowUserPointer(window));
+        app->framebufferResized = true;
+    });
 
     vkb::InstanceBuilder builder;
     auto inst_ret = builder.set_app_name("GeomVulkan")
@@ -544,6 +597,7 @@ void Visualizer::init(int width, int height) {
 
     vkb::Device vkb_device = dev_ret.value();
     vkState->device = vkb_device.device;
+    vkState->vkb_device = vkb_device; // Salva para uso futuro no recriar da swapchain
 
     vkState->graphicsQueue = vkb_device.get_queue(vkb::QueueType::graphics).value();
     vkState->presentQueue = vkb_device.get_queue(vkb::QueueType::present).value();
@@ -613,13 +667,11 @@ void Visualizer::init(int width, int height) {
 void Visualizer::cleanup() {
     if (!vkState) return;
 
-    // Resolve o memory leak principal da árvore do packer
     stbtt_PackEnd(&vkState->spc);
 
     if (vkState->device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(vkState->device);
 
-        // Desaloca staging buffer do font atlas
         if (vkState->fontStagingBuffer != VK_NULL_HANDLE) {
             vkUnmapMemory(vkState->device, vkState->fontStagingMemory);
             vkDestroyBuffer(vkState->device, vkState->fontStagingBuffer, nullptr);
@@ -706,6 +758,7 @@ void Visualizer::render_frame(glm::mat4 proj) {
     VkResult result = vkAcquireNextImageKHR(vkState->device, vkState->swapChain, UINT64_MAX, vkState->imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
     
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swapchain();
         return; 
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         std::cout << "ERRO: vkAcquireNextImageKHR falhou." << std::endl;
@@ -740,7 +793,6 @@ void Visualizer::render_frame(glm::mat4 proj) {
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(vkState->commandBuffer, &beginInfo);
 
-    // --- SICRONIZAÇÃO DINÂMICA CPU -> GPU PARA CARACTERES UTF-8 ---
     if (vkState->fontAtlasDirty) {
         memcpy(vkState->fontStagingMapped, vkState->atlasBitmap.data(), 1024 * 1024);
 
@@ -860,7 +912,14 @@ void Visualizer::render_frame(glm::mat4 proj) {
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(vkState->presentQueue, &presentInfo);
+    result = vkQueuePresentKHR(vkState->presentQueue, &presentInfo);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+        framebufferResized = false;
+        recreate_swapchain();
+    } else if (result != VK_SUCCESS) {
+        std::cout << "ERRO: vkQueuePresentKHR falhou." << std::endl;
+    }
 
     glfwPollEvents();
 }
@@ -919,7 +978,6 @@ void Visualizer::draw_text(const std::string& text, pt<float> pos, float font_si
         }
         i += bytes_to_read;
 
-        // Limite de segurança para não explodir os arrays caso passem Emojis (codepoint > 65535)
         if (codepoint >= 65536) codepoint = '?'; 
 
         if (!vkState->charBaked[codepoint]) {
@@ -932,7 +990,7 @@ void Visualizer::draw_text(const std::string& text, pt<float> pos, float font_si
 
             stbtt_PackFontRanges(&vkState->spc, vkState->fontBufferStorage.data(), 0, &range, 1);
             vkState->charBaked[codepoint] = true;
-            vkState->fontAtlasDirty = true; // Avisa a GPU para atualizar a textura antes de renderizar
+            vkState->fontAtlasDirty = true;
         }
 
         stbtt_aligned_quad q;
