@@ -23,7 +23,7 @@ signed main() {
     } while(!inpol(poly, guard));
 
     AlgorithmRecorder recorder(mn,mx,mn,mx);
-    recorder.set_live_debug(true);
+//    recorder.set_live_debug(true);
 
     auto triangulation = triangulate(poly);
     auto pts = poly;
